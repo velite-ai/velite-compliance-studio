@@ -7,6 +7,7 @@ import VerdictBadge from '../components/VerdictBadge'
 import TrackBadge from '../components/TrackBadge'
 import CheckTypeBadge from '../components/CheckTypeBadge'
 import { format, parseISO } from 'date-fns'
+import { generateCompliancePDF, generateDesignerBriefPDF, generateAnnotatedJPEG } from '../lib/reports'
 
 export default function CheckDetail() {
   const { id } = useParams()
@@ -31,6 +32,9 @@ export default function CheckDetail() {
   const [selectedIssueIdx,  setSelectedIssueIdx]  = useState(null)
   const [savingAnnotations, setSavingAnnotations] = useState(false)
   const [annotationsSaved,  setAnnotationsSaved]  = useState(false)
+
+  // ── Reports state ──────────────────────────────────────────────────────
+  const [generatingReport, setGeneratingReport] = useState(null) // 'compliance' | 'brief' | 'jpeg' | null
 
   useEffect(() => { load() }, [id])
 
@@ -137,6 +141,40 @@ export default function CheckDetail() {
     setAnnotationsSaved(false)
   }
 
+  // ── Report download handlers ───────────────────────────────────────────────
+  async function downloadCompliancePDF() {
+    setGeneratingReport('compliance')
+    try {
+      const doc = await generateCompliancePDF(check)
+      doc.save(`${check.product_name || 'compliance'}-report-${format(new Date(), 'yyyyMMdd')}.pdf`)
+    } catch(e) { console.error(e) }
+    setGeneratingReport(null)
+  }
+
+  async function downloadDesignerBrief() {
+    setGeneratingReport('brief')
+    try {
+      const doc = await generateDesignerBriefPDF(check)
+      doc.save(`${check.product_name || 'designer'}-brief-${format(new Date(), 'yyyyMMdd')}.pdf`)
+    } catch(e) { console.error(e) }
+    setGeneratingReport(null)
+  }
+
+  async function downloadAnnotatedJPEG() {
+    if (!frontUrl || markers.length === 0) return
+    setGeneratingReport('jpeg')
+    try {
+      const blob = await generateAnnotatedJPEG(frontUrl, markers, annotateItems)
+      const url  = URL.createObjectURL(blob)
+      const a    = document.createElement('a')
+      a.href     = url
+      a.download = `${check.product_name || 'annotated'}-label-${format(new Date(), 'yyyyMMdd')}.jpg`
+      a.click()
+      URL.revokeObjectURL(url)
+    } catch(e) { console.error(e) }
+    setGeneratingReport(null)
+  }
+
   // ── Derived data ──────────────────────────────────────────────────────
   if (loading) return <div className="loading-page"><span className="spinner" /> Loading report…</div>
   if (!check)  return <div className="loading-page">Check not found.</div>
@@ -241,6 +279,9 @@ export default function CheckDetail() {
           )}
           <button className={`tab-btn${activeTab === 'notes' ? ' active' : ''}`} onClick={() => setActiveTab('notes')}>
             Notes
+          </button>
+          <button className={`tab-btn${activeTab === 'reports' ? ' active' : ''}`} onClick={() => setActiveTab('reports')}>
+            📄 Reports
           </button>
         </div>
 
@@ -443,6 +484,95 @@ export default function CheckDetail() {
             >
               {savingNotes ? <><span className="spinner" /> Saving…</> : 'Save Notes'}
             </button>
+          </div>
+        )}
+
+        {/* ── REPORTS TAB ── */}
+        {activeTab === 'reports' && (
+          <div>
+            <p style={{ fontSize: 13, color: 'var(--text-3)', marginBottom: 16 }}>
+              Download structured reports for compliance review, design revisions, or packaging records.
+            </p>
+            <div className="reports-grid">
+
+              {/* Compliance PDF */}
+              <div className="report-card">
+                <div className="report-card-icon green">📋</div>
+                <div className="report-card-content">
+                  <div className="report-card-title">Compliance Report PDF</div>
+                  <div className="report-card-desc">Full structured report with all issues, scores, and recommendations.</div>
+                  <ul className="report-card-includes">
+                    <li>Verdict badge &amp; compliance score</li>
+                    <li>All FAIL and WARNING items</li>
+                    <li>Passed checks &amp; logo/mark checks</li>
+                    <li>Style suggestions (if any)</li>
+                  </ul>
+                </div>
+                <button
+                  className="btn btn-primary"
+                  onClick={downloadCompliancePDF}
+                  disabled={generatingReport === 'compliance'}
+                >
+                  {generatingReport === 'compliance'
+                    ? <><span className="spinner" /> Generating…</>
+                    : '⬇ Download PDF'}
+                </button>
+              </div>
+
+              {/* Designer Brief PDF */}
+              <div className="report-card">
+                <div className="report-card-icon amber">✏️</div>
+                <div className="report-card-content">
+                  <div className="report-card-title">Designer Brief PDF</div>
+                  <div className="report-card-desc">Concise action list for the packaging designer — share directly.</div>
+                  <ul className="report-card-includes">
+                    <li>Numbered FIX / REVIEW items only</li>
+                    <li>Specific recommendations per item</li>
+                    <li>Approval &amp; sign-off section</li>
+                  </ul>
+                </div>
+                <button
+                  className="btn btn-primary"
+                  onClick={downloadDesignerBrief}
+                  disabled={generatingReport === 'brief'}
+                >
+                  {generatingReport === 'brief'
+                    ? <><span className="spinner" /> Generating…</>
+                    : '⬇ Download Brief'}
+                </button>
+              </div>
+
+              {/* Annotated JPEG */}
+              <div className={`report-card${!frontUrl || markers.length === 0 ? ' report-card-disabled' : ''}`}>
+                <div className="report-card-icon purple">📍</div>
+                <div className="report-card-content">
+                  <div className="report-card-title">Annotated Label Image</div>
+                  <div className="report-card-desc">
+                    {!frontUrl
+                      ? 'No label image uploaded for this check.'
+                      : markers.length === 0
+                        ? 'Add annotation markers on the Annotate tab first.'
+                        : `Label image with ${markers.length} numbered issue marker${markers.length !== 1 ? 's' : ''}.`
+                    }
+                  </div>
+                  <ul className="report-card-includes">
+                    <li>Numbered circles on label image</li>
+                    <li>Red = FAIL · Amber = WARNING</li>
+                    <li>High-quality JPEG export</li>
+                  </ul>
+                </div>
+                <button
+                  className="btn btn-primary"
+                  onClick={downloadAnnotatedJPEG}
+                  disabled={!frontUrl || markers.length === 0 || generatingReport === 'jpeg'}
+                >
+                  {generatingReport === 'jpeg'
+                    ? <><span className="spinner" /> Generating…</>
+                    : '⬇ Download JPEG'}
+                </button>
+              </div>
+
+            </div>
           </div>
         )}
       </div>
