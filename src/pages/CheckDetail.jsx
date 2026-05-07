@@ -14,7 +14,8 @@ export default function CheckDetail() {
   const reportRef = useRef()
 
   const [check, setCheck] = useState(null)
-  const [labelUrl, setLabelUrl] = useState(null)
+  const [frontUrl, setFrontUrl] = useState(null)
+  const [backUrl,  setBackUrl]  = useState(null)
   const [loading, setLoading] = useState(true)
   const [notes, setNotes] = useState('')
   const [savingNotes, setSavingNotes] = useState(false)
@@ -33,9 +34,15 @@ export default function CheckDetail() {
     if (data) {
       setCheck(data)
       setNotes(data.notes || '')
-      if (data.label_file_path) {
-        const { data: urlData } = await supabase.storage.from('labels').createSignedUrl(data.label_file_path, 3600)
-        if (urlData) setLabelUrl(urlData.signedUrl)
+      // Prefer front_file_path (Module 3A), fall back to legacy label_file_path
+      const frontPath = data.front_file_path || data.label_file_path
+      if (frontPath) {
+        const { data: fUrl } = await supabase.storage.from('labels').createSignedUrl(frontPath, 3600)
+        if (fUrl) setFrontUrl(fUrl.signedUrl)
+      }
+      if (data.back_file_path) {
+        const { data: bUrl } = await supabase.storage.from('labels').createSignedUrl(data.back_file_path, 3600)
+        if (bUrl) setBackUrl(bUrl.signedUrl)
       }
     }
     setLoading(false)
@@ -128,8 +135,21 @@ export default function CheckDetail() {
               )}
             </div>
           </div>
-          {labelUrl && (
-            <img src={labelUrl} alt="Label" className="label-preview" style={{ width: 120, height: 120 }} />
+          {(frontUrl || backUrl) && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6, alignItems: 'flex-end' }}>
+              {frontUrl && (
+                <div>
+                  <div style={{ fontSize: 9, fontWeight: 700, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '.05em', marginBottom: 3 }}>Front</div>
+                  <img src={frontUrl} alt="Label front" className="label-preview" style={{ width: 110, height: 110 }} />
+                </div>
+              )}
+              {backUrl && (
+                <div>
+                  <div style={{ fontSize: 9, fontWeight: 700, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '.05em', marginBottom: 3 }}>Back</div>
+                  <img src={backUrl} alt="Label back" className="label-preview" style={{ width: 110, height: 110 }} />
+                </div>
+              )}
+            </div>
           )}
         </div>
 

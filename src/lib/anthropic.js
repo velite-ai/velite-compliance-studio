@@ -5,8 +5,10 @@ const ANTHROPIC_API_KEY = import.meta.env.VITE_ANTHROPIC_API_KEY
  * Returns structured JSON: { verdict, score, summary, items[], style_suggestions[] }
  *
  * @param {Object} opts
- * @param {string} opts.base64        - Base64-encoded image data
- * @param {string} opts.mimeType      - Image MIME type
+ * @param {string} opts.base64        - Base64-encoded front image data (required)
+ * @param {string} opts.mimeType      - Front image MIME type
+ * @param {string} [opts.backBase64]  - Base64-encoded back image data (optional)
+ * @param {string} [opts.backMimeType]- Back image MIME type
  * @param {string} opts.productName   - Product name
  * @param {string} opts.productCategory - Product category
  * @param {string} opts.extraContext  - Additional notes from user
@@ -17,6 +19,8 @@ const ANTHROPIC_API_KEY = import.meta.env.VITE_ANTHROPIC_API_KEY
 export async function analyseLabel({
   base64,
   mimeType,
+  backBase64 = null,
+  backMimeType = null,
   productName,
   productCategory,
   extraContext,
@@ -24,20 +28,35 @@ export async function analyseLabel({
   styleRules,
   track = 'cosmetic',
 }) {
-  const systemPrompt = track === 'drug'
-    ? buildDrugPrompt({ regulations, styleRules, extraContext, productCategory })
-    : buildCosmeticPrompt({ regulations, styleRules, extraContext, productCategory })
+  const hasBack = Boolean(backBase64 && backMimeType)
 
-  const userContent = [
-    {
-      type: 'image',
-      source: { type: 'base64', media_type: mimeType, data: base64 },
-    },
-    {
-      type: 'text',
-      text: `Analyse this ${productCategory || (track === 'drug' ? 'drug' : 'cosmetic')} label${productName ? ` for "${productName}"` : ''}. Return only the JSON compliance report.`,
-    },
-  ]
+  const systemPrompt = track === 'drug'
+    ? buildDrugPrompt({ regulations, styleRules, extraContext, productCategory, hasBack })
+    : buildCosmeticPrompt({ regulations, styleRules, extraContext, productCategory, hasBack })
+
+  // Build content array — front face always first, back face appended when available
+  const userContent = []
+
+  if (hasBack) {
+    userContent.push(
+      { type: 'text', text: '── FRONT FACE of the label / carton ──' },
+      { type: 'image', source: { type: 'base64', media_type: mimeType, data: base64 } },
+      { type: 'text', text: '── BACK FACE of the label / carton ──' },
+      { type: 'image', source: { type: 'base64', media_type: backMimeType, data: backBase64 } },
+      {
+        type: 'text',
+        text: `Both faces of this ${productCategory || (track === 'drug' ? 'drug' : 'cosmetic')} label${productName ? ` for "${productName}"` : ''} are shown above. Check all mandatory declarations across both faces. Return only the JSON compliance report.`,
+      },
+    )
+  } else {
+    userContent.push(
+      { type: 'image', source: { type: 'base64', media_type: mimeType, data: base64 } },
+      {
+        type: 'text',
+        text: `Analyse this ${productCategory || (track === 'drug' ? 'drug' : 'cosmetic')} label${productName ? ` for "${productName}"` : ''} (front face only — no back face provided). Return only the JSON compliance report.`,
+      },
+    )
+  }
 
   const response = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
@@ -98,7 +117,7 @@ Score rubric: 100 = perfect, deduct 10 per FAIL item, 5 per WARNING item.
 verdict = "PASS" if score >= 80 and no FAIL items, "FAIL" if any FAIL items or score < 60, otherwise "REVIEW_REQUIRED".`
 
 // ── COSMETIC PROMPT ──────────────────────────────────────────────────────
-function buildCosmeticPrompt({ regulations, styleRules, extraContext, productCategory }) {
+function buildCosmeticPrompt({ regulations, styleRules, extraContext, productCategory, hasBack }) {
   const regulationList = []
   if (regulations.cosmetics)
     regulationList.push('Cosmetics Rules 2020 (India) — all mandatory label declarations')
@@ -149,10 +168,16 @@ MANDATORY DECLARATIONS CHECKLIST (Cosmetics Rules 2020 + Legal Metrology):
     }
   }
 
+  const faceNote = hasBack
+    ? 'Both the FRONT and BACK faces of the label/carton have been provided. Check mandatory declarations across BOTH faces — a field is compliant if it appears on either face.'
+    : 'Only the FRONT face of the label has been provided. Note any fields that are typically on the back face as "Not visible — back face not uploaded" (WARNING, not FAIL).'
+
   return `You are a regulatory compliance expert specialising in Indian cosmetics packaging regulations.
-Analyse the label image provided and produce a structured compliance report in valid JSON only — no markdown, no prose outside the JSON.
+Analyse the label image(s) provided and produce a structured compliance report in valid JSON only — no markdown, no prose outside the JSON.
 
 TRACK: COSMETIC — regulated under Cosmetics Rules 2020 & Legal Metrology Rules 2011.
+FACES PROVIDED: ${hasBack ? 'Front + Back' : 'Front only'}
+${faceNote}
 
 REGULATIONS TO CHECK:
 ${regulationList.map((r, i) => `${i + 1}. ${r}`).join('\n')}
@@ -163,7 +188,7 @@ ${JSON_SCHEMA}`
 }
 
 // ── DRUG PROMPT ──────────────────────────────────────────────────────────
-function buildDrugPrompt({ regulations, styleRules, extraContext, productCategory }) {
+function buildDrugPrompt({ regulations, styleRules, extraContext, productCategory, hasBack }) {
   const regulationList = []
   if (regulations.drug_act)
     regulationList.push(
@@ -217,10 +242,16 @@ MANDATORY DECLARATIONS CHECKLIST (D&C Rules 1945 Rule 96 + Legal Metrology):
     }
   }
 
+  const faceNote = hasBack
+    ? 'Both the FRONT and BACK faces of the drug carton/label have been provided. Check mandatory declarations across BOTH faces — a field is compliant if it appears on either face.'
+    : 'Only the FRONT face of the label has been provided. Note any fields typically on the back/side panels as "Not visible — back face not uploaded" (WARNING, not FAIL).'
+
   return `You are a regulatory compliance expert specialising in Indian pharmaceutical drug packaging regulations.
-Analyse the drug label image provided and produce a structured compliance report in valid JSON only — no markdown, no prose outside the JSON.
+Analyse the drug label image(s) provided and produce a structured compliance report in valid JSON only — no markdown, no prose outside the JSON.
 
 TRACK: DRUG — regulated under Drugs & Cosmetics Act 1940 and Drugs & Cosmetics Rules 1945.
+FACES PROVIDED: ${hasBack ? 'Front + Back' : 'Front only'}
+${faceNote}
 
 REGULATIONS TO CHECK:
 ${regulationList.map((r, i) => `${i + 1}. ${r}`).join('\n')}

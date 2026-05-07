@@ -19,27 +19,33 @@ const COSMETIC_REG_DEFAULTS = { cosmetics: true, weights: true, claims: true, in
 export default function NewCheck() {
   const { user } = useAuth()
   const navigate = useNavigate()
-  const fileRef = useRef()
+  const frontRef = useRef()
+  const backRef  = useRef()
 
   // ── Track ─────────────────────────────────────────────────────────────
   const [track, setTrack] = useState('cosmetic')
 
+  // ── Dual file upload ──────────────────────────────────────────────────
+  const [frontFile,    setFrontFile]    = useState(null)
+  const [frontPreview, setFrontPreview] = useState(null)
+  const [backFile,     setBackFile]     = useState(null)
+  const [backPreview,  setBackPreview]  = useState(null)
+  const [frontDrag,    setFrontDrag]    = useState(false)
+  const [backDrag,     setBackDrag]     = useState(false)
+
   // ── Form state ────────────────────────────────────────────────────────
-  const [file, setFile] = useState(null)
-  const [preview, setPreview] = useState(null)
-  const [productName, setProductName] = useState('')
-  const [category, setCategory] = useState('')
+  const [productName,  setProductName]  = useState('')
+  const [category,     setCategory]     = useState('')
   const [extraContext, setExtraContext] = useState('')
-  const [dragOver, setDragOver] = useState(false)
-  const [regs, setRegs] = useState(COSMETIC_REG_DEFAULTS)
-  const [styleRules, setStyleRules] = useState([])
+  const [regs,         setRegs]         = useState(COSMETIC_REG_DEFAULTS)
+  const [styleRules,   setStyleRules]   = useState([])
 
   // ── Async state ───────────────────────────────────────────────────────
   const [analysing, setAnalysing] = useState(false)
-  const [saving, setSaving] = useState(false)
-  const [result, setResult] = useState(null)
-  const [savedId, setSavedId] = useState(null)
-  const [error, setError] = useState('')
+  const [saving,    setSaving]    = useState(false)
+  const [result,    setResult]    = useState(null)
+  const [savedId,   setSavedId]   = useState(null)
+  const [error,     setError]     = useState('')
 
   useEffect(() => {
     supabase.from('style_rules').select('*').eq('is_active', true).then(({ data }) => {
@@ -58,9 +64,11 @@ export default function NewCheck() {
 
   const categories = track === 'drug' ? DRUG_PRODUCT_CATEGORIES : PRODUCT_CATEGORIES
   const regToggles = track === 'drug' ? DRUG_REGULATION_TOGGLES : REGULATION_TOGGLES
+  const isDrug     = track === 'drug'
 
-  function handleFile(f) {
-    if (!f) return
+  // ── File helpers ──────────────────────────────────────────────────────
+  function loadFile(f, setFile, setPreview) {
+    if (!f || !f.type.startsWith('image/')) return
     setFile(f)
     const reader = new FileReader()
     reader.onload = e => setPreview(e.target.result)
@@ -69,25 +77,33 @@ export default function NewCheck() {
     setSavedId(null)
   }
 
-  function handleDrop(e) {
-    e.preventDefault()
-    setDragOver(false)
-    const f = e.dataTransfer.files[0]
-    if (f && f.type.startsWith('image/')) handleFile(f)
+  function clearFront() {
+    setFrontFile(null); setFrontPreview(null)
+    setResult(null); setSavedId(null)
   }
 
+  function clearBack() {
+    setBackFile(null); setBackPreview(null)
+    setResult(null); setSavedId(null)
+  }
+
+  // ── Run check ─────────────────────────────────────────────────────────
   async function runCheck() {
-    if (!file) { setError('Please upload a label file first.'); return }
+    if (!frontFile)         { setError('Please upload the front face of the label.'); return }
     if (!productName.trim()) { setError('Please enter a product name.'); return }
     setError('')
     setAnalysing(true)
     setResult(null)
 
     try {
-      const base64 = await fileToBase64(file)
+      const frontBase64 = await fileToBase64(frontFile)
+      const backBase64  = backFile ? await fileToBase64(backFile) : null
+
       const res = await analyseLabel({
-        base64,
-        mimeType: file.type,
+        base64:      frontBase64,
+        mimeType:    frontFile.type,
+        backBase64,
+        backMimeType: backFile?.type || null,
         productName,
         productCategory: category,
         extraContext,
@@ -103,31 +119,46 @@ export default function NewCheck() {
     }
   }
 
+  // ── Save check ────────────────────────────────────────────────────────
   async function saveCheck() {
     if (!result || !user) return
     setSaving(true)
     setError('')
 
     try {
-      let filePath = null
-      const ext = file.name.split('.').pop()
-      const fileName = `${user.id}/${Date.now()}.${ext}`
-      const { data: upData } = await supabase.storage.from('labels').upload(fileName, file, { contentType: file.type })
-      if (upData) filePath = upData.path
+      // Upload front
+      const frontExt  = frontFile.name.split('.').pop()
+      const frontName = `${user.id}/${Date.now()}-front.${frontExt}`
+      const { data: frontUp } = await supabase.storage.from('labels').upload(frontName, frontFile, { contentType: frontFile.type })
+      const frontPath = frontUp?.path || null
+
+      // Upload back (optional)
+      let backPath = null
+      if (backFile) {
+        const backExt  = backFile.name.split('.').pop()
+        const backName = `${user.id}/${Date.now()}-back.${backExt}`
+        const { data: backUp } = await supabase.storage.from('labels').upload(backName, backFile, { contentType: backFile.type })
+        backPath = backUp?.path || null
+      }
 
       const { data: check, error: insErr } = await supabase.from('checks').insert({
-        user_id: user.id,
-        product_name: productName,
-        product_category: category || null,
+        user_id:            user.id,
+        product_name:       productName,
+        product_category:   category || null,
         track,
-        verdict: result.verdict,
-        score: result.score,
-        summary: result.summary,
-        report_json: result.items || [],
+        verdict:            result.verdict,
+        score:              result.score,
+        summary:            result.summary,
+        report_json:        result.items || [],
         regulations_checked: Object.keys(regs).filter(k => regs[k]),
-        label_file_path: filePath,
-        label_file_name: file.name,
-        extra_context: extraContext || null,
+        // Dual upload fields
+        front_file_path:    frontPath,
+        back_file_path:     backPath,
+        back_file_name:     backFile?.name || null,
+        // Backward compat: label_file_path = front
+        label_file_path:    frontPath,
+        label_file_name:    frontFile.name,
+        extra_context:      extraContext || null,
       }).select().single()
 
       if (insErr) throw insErr
@@ -158,9 +189,9 @@ export default function NewCheck() {
     await saveCheck()
     if (savedId) {
       await supabase.from('checks').update({
-        is_approved: true,
-        approved_at: new Date().toISOString(),
-        approved_by: user.id,
+        is_approved:  true,
+        approved_at:  new Date().toISOString(),
+        approved_by:  user.id,
       }).eq('id', savedId)
       navigate(`/checks/${savedId}`)
     }
@@ -169,8 +200,6 @@ export default function NewCheck() {
   const failItems = result?.items?.filter(i => i.status === 'FAIL')    || []
   const warnItems = result?.items?.filter(i => i.status === 'WARNING') || []
   const passItems = result?.items?.filter(i => i.status === 'PASS')    || []
-
-  const isDrug = track === 'drug'
 
   return (
     <div>
@@ -215,40 +244,82 @@ export default function NewCheck() {
         {/* LEFT: Inputs */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
 
-          {/* Upload */}
+          {/* ── DUAL UPLOAD ── */}
           <div className="card">
-            <div className="card-header"><span className="card-title">Label / Artwork</span></div>
-            <div className="card-body">
-              {!file ? (
-                <div
-                  className={`upload-zone${dragOver ? ' drag-over' : ''}`}
-                  onDragOver={e => { e.preventDefault(); setDragOver(true) }}
-                  onDragLeave={() => setDragOver(false)}
-                  onDrop={handleDrop}
-                  onClick={() => fileRef.current.click()}
-                >
-                  <div className="upload-icon">🖼️</div>
-                  <h3>Drop label image here</h3>
-                  <p>or click to browse · JPG, PNG, WEBP</p>
-                  <input
-                    ref={fileRef} type="file" hidden
-                    accept="image/*"
-                    onChange={e => handleFile(e.target.files[0])}
-                  />
-                </div>
-              ) : (
-                <div>
-                  <img src={preview} alt="Label preview" className="label-preview" />
-                  <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
-                    <span style={{ fontSize: 12, color: 'var(--text-3)', flex: 1 }}>
-                      {file.name} · {(file.size / 1024).toFixed(0)} KB
-                    </span>
-                    <button className="btn btn-sm" onClick={() => { setFile(null); setPreview(null); setResult(null) }}>
-                      Change
-                    </button>
-                  </div>
-                </div>
+            <div className="card-header">
+              <span className="card-title">Label / Artwork</span>
+              {frontFile && backFile && (
+                <span style={{ fontSize: 11, color: 'var(--pass)', fontWeight: 600 }}>✓ Both faces uploaded</span>
               )}
+              {frontFile && !backFile && (
+                <span style={{ fontSize: 11, color: 'var(--warn)' }}>Front only — add back face for full check</span>
+              )}
+            </div>
+            <div className="card-body" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+
+              {/* Front Face */}
+              <div>
+                <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-2)', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '.05em' }}>
+                  Front Face <span style={{ color: 'var(--fail)' }}>*</span>
+                </div>
+                {!frontFile ? (
+                  <div
+                    className={`upload-zone${frontDrag ? ' drag-over' : ''}`}
+                    style={{ padding: '24px 12px' }}
+                    onDragOver={e => { e.preventDefault(); setFrontDrag(true) }}
+                    onDragLeave={() => setFrontDrag(false)}
+                    onDrop={e => { e.preventDefault(); setFrontDrag(false); loadFile(e.dataTransfer.files[0], setFrontFile, setFrontPreview) }}
+                    onClick={() => frontRef.current.click()}
+                  >
+                    <div className="upload-icon" style={{ fontSize: 24 }}>🖼️</div>
+                    <p style={{ fontSize: 11 }}>Drop or click to upload</p>
+                    <input ref={frontRef} type="file" hidden accept="image/*"
+                      onChange={e => loadFile(e.target.files[0], setFrontFile, setFrontPreview)} />
+                  </div>
+                ) : (
+                  <div>
+                    <img src={frontPreview} alt="Front" className="label-preview" style={{ maxHeight: 160 }} />
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 6 }}>
+                      <span style={{ fontSize: 10, color: 'var(--text-3)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {frontFile.name}
+                      </span>
+                      <button className="btn btn-sm" style={{ padding: '3px 8px', fontSize: 11 }} onClick={clearFront}>✕</button>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Back Face */}
+              <div>
+                <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-2)', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '.05em' }}>
+                  Back Face <span style={{ fontSize: 10, color: 'var(--text-3)', fontWeight: 400 }}>(optional)</span>
+                </div>
+                {!backFile ? (
+                  <div
+                    className={`upload-zone${backDrag ? ' drag-over' : ''}`}
+                    style={{ padding: '24px 12px', borderStyle: 'dashed', opacity: .8 }}
+                    onDragOver={e => { e.preventDefault(); setBackDrag(true) }}
+                    onDragLeave={() => setBackDrag(false)}
+                    onDrop={e => { e.preventDefault(); setBackDrag(false); loadFile(e.dataTransfer.files[0], setBackFile, setBackPreview) }}
+                    onClick={() => backRef.current.click()}
+                  >
+                    <div className="upload-icon" style={{ fontSize: 24 }}>🖼️</div>
+                    <p style={{ fontSize: 11 }}>Drop or click to upload</p>
+                    <input ref={backRef} type="file" hidden accept="image/*"
+                      onChange={e => loadFile(e.target.files[0], setBackFile, setBackPreview)} />
+                  </div>
+                ) : (
+                  <div>
+                    <img src={backPreview} alt="Back" className="label-preview" style={{ maxHeight: 160 }} />
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 6 }}>
+                      <span style={{ fontSize: 10, color: 'var(--text-3)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {backFile.name}
+                      </span>
+                      <button className="btn btn-sm" style={{ padding: '3px 8px', fontSize: 11 }} onClick={clearBack}>✕</button>
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
           </div>
 
@@ -334,11 +405,11 @@ export default function NewCheck() {
               borderColor: isDrug ? 'var(--drug)' : undefined,
             }}
             onClick={runCheck}
-            disabled={analysing || !file}
+            disabled={analysing || !frontFile}
           >
             {analysing
-              ? <><span className="spinner" /> Analysing label…</>
-              : `⚡ Run ${isDrug ? 'Drug' : 'Cosmetic'} Compliance Check`}
+              ? <><span className="spinner" /> Analysing {backFile ? 'both faces' : 'label'}…</>
+              : `⚡ Run ${isDrug ? 'Drug' : 'Cosmetic'} Compliance Check${backFile ? ' (Front + Back)' : ''}`}
           </button>
         </div>
 
@@ -349,7 +420,10 @@ export default function NewCheck() {
               <div className="empty-state" style={{ padding: '48px 24px' }}>
                 <div className="empty-icon">{isDrug ? '💊' : '🔍'}</div>
                 <h3>No report yet</h3>
-                <p>Upload a {isDrug ? 'drug' : 'cosmetic'} label and click Run to analyse it against Indian {isDrug ? 'drug (D&C Rules 1945)' : 'cosmetic (Cosmetics Rules 2020)'} packaging regulations.</p>
+                <p>Upload the front face of the label (back face optional) and click Run to analyse against Indian {isDrug ? 'D&C Rules 1945' : 'Cosmetics Rules 2020'}.</p>
+                <p style={{ marginTop: 8, fontSize: 11, color: 'var(--text-3)' }}>
+                  Uploading both faces gives a more complete check
+                </p>
               </div>
             </div>
           )}
@@ -359,8 +433,8 @@ export default function NewCheck() {
               <div className="loading-page" style={{ flexDirection: 'column', padding: '48px 24px' }}>
                 <span className="spinner" style={{ width: 32, height: 32, borderWidth: 3 }} />
                 <p style={{ marginTop: 12, fontSize: 13, color: 'var(--text-2)', textAlign: 'center' }}>
-                  Claude is reviewing your {isDrug ? 'drug' : 'cosmetic'} label against Indian {isDrug ? 'D&C Rules 1945' : 'Cosmetics Rules 2020'}…<br />
-                  <span style={{ color: 'var(--text-3)', fontSize: 11 }}>This usually takes 10–20 seconds</span>
+                  Claude is reviewing {backFile ? 'both faces of' : 'the'} {isDrug ? 'drug' : 'cosmetic'} label…<br />
+                  <span style={{ color: 'var(--text-3)', fontSize: 11 }}>This usually takes 10–30 seconds</span>
                 </p>
               </div>
             </div>
@@ -376,9 +450,8 @@ export default function NewCheck() {
                   <div style={{ marginTop: 6, display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
                     <VerdictBadge verdict={result.verdict} size="lg" />
                     <TrackBadge track={track} size="sm" />
-                    {category && (
-                      <span className="badge badge-gray">{category}</span>
-                    )}
+                    {backFile && <span className="badge badge-gray">Front + Back</span>}
+                    {category && <span className="badge badge-gray">{category}</span>}
                   </div>
                   <div className="result-summary">{result.summary}</div>
                 </div>
@@ -427,7 +500,11 @@ export default function NewCheck() {
                   <button className="btn btn-primary" onClick={() => navigate(`/checks/${savedId}`)}>
                     View Full Report →
                   </button>
-                  <button className="btn" onClick={() => { setResult(null); setFile(null); setPreview(null); setSavedId(null); setProductName(''); setCategory('') }}>
+                  <button className="btn" onClick={() => {
+                    setResult(null); setFrontFile(null); setFrontPreview(null)
+                    setBackFile(null); setBackPreview(null)
+                    setSavedId(null); setProductName(''); setCategory('')
+                  }}>
                     New Check
                   </button>
                 </div>
@@ -463,11 +540,7 @@ function IssueCard({ item }) {
 function fileToBase64(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader()
-    reader.onload = () => {
-      const result = reader.result
-      const base64 = result.split(',')[1]
-      resolve(base64)
-    }
+    reader.onload = () => resolve(reader.result.split(',')[1])
     reader.onerror = reject
     reader.readAsDataURL(file)
   })
