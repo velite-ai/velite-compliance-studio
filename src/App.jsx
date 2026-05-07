@@ -12,6 +12,7 @@ import CheckDetail from './pages/CheckDetail'
 import StyleGuide from './pages/StyleGuide'
 import Regulations from './pages/Regulations'
 import TextGenerator from './pages/TextGenerator'
+import ExportCompliance from './pages/ExportCompliance'
 
 function ProtectedRoute({ children }) {
   const { user, loading } = useAuth()
@@ -45,6 +46,7 @@ export default function App() {
         <Route path="checks/:id" element={<CheckDetail />} />
         <Route path="style-guide" element={<StyleGuide />} />
         <Route path="regulations" element={<Regulations />} />
+        <Route path="export" element={<ExportCompliance />} />
       </Route>
     </Routes>
   )

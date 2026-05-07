@@ -390,6 +390,138 @@ ${logoSection}
 ${JSON_SCHEMA}`
 }
 
+// ── EXPORT COMPLIANCE ────────────────────────────────────────────────────
+/**
+ * Analyse labelling & regulatory gaps for an Indian product entering export markets.
+ *
+ * @param {Object}  opts
+ * @param {string}  opts.track            - 'cosmetic' | 'drug'
+ * @param {string}  opts.productName      - Product name
+ * @param {string}  opts.productCategory  - Product category
+ * @param {string}  opts.ingredients      - INCI / active ingredient list
+ * @param {string}  opts.claims           - Key claims (cosmetic) or therapeutic indications (drug)
+ * @param {string}  [opts.schedule]       - Drug schedule (drug track only)
+ * @param {Array}   opts.selectedMarkets  - Market objects: { country, country_code, flag, regulation }
+ *
+ * Returns: { markets: [{ country, country_code, flag, regulation, overall_status, gap_count, summary, gaps[] }] }
+ */
+export async function analyseExportCompliance({
+  track,
+  productName,
+  productCategory,
+  ingredients,
+  claims,
+  schedule,
+  selectedMarkets,
+}) {
+  const systemPrompt = buildExportPrompt({ track, productName, productCategory, ingredients, claims, schedule, selectedMarkets })
+
+  const response = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': ANTHROPIC_API_KEY,
+      'anthropic-version': '2023-06-01',
+      'anthropic-dangerous-direct-browser-access': 'true',
+    },
+    body: JSON.stringify({
+      model: 'claude-opus-4-5',
+      max_tokens: 8192,
+      system: systemPrompt,
+      messages: [{ role: 'user', content: 'Analyse export compliance gaps now. Return only the JSON.' }],
+    }),
+  })
+
+  if (!response.ok) {
+    const err = await response.text()
+    throw new Error(`Claude API error: ${response.status} — ${err}`)
+  }
+
+  const data = await response.json()
+  const raw = data.content?.[0]?.text || ''
+  const cleaned = raw.replace(/^```json\s*/i, '').replace(/```\s*$/i, '').trim()
+  return JSON.parse(cleaned)
+}
+
+function buildExportPrompt({ track, productName, productCategory, ingredients, claims, schedule, selectedMarkets }) {
+  const isDrug = track === 'drug'
+  const indianRegs = isDrug
+    ? 'Drugs & Cosmetics Act 1940 + Drugs & Cosmetics Rules 1945 (Rule 96) + Legal Metrology (Packaged Commodities) Rules 2011'
+    : 'Cosmetics Rules 2020 (India) + Legal Metrology (Packaged Commodities) Rules 2011'
+
+  const marketList = selectedMarkets
+    .map((m, i) =>
+      `${i + 1}. ${m.flag} ${m.country} — ${m.regulation} (country_code: "${m.country_code}", flag: "${m.flag}")`
+    )
+    .join('\n')
+
+  const productInfo = `
+PRODUCT INFORMATION:
+Product Name: ${productName || '(not provided)'}
+Category / Dosage Form: ${productCategory || '(not provided)'}
+Type: ${isDrug ? 'Pharmaceutical Drug' : 'Cosmetic'}
+${isDrug ? `Drug Schedule (Indian): ${schedule || 'OTC (No Schedule)'}` : ''}
+${isDrug ? 'Active Ingredients:' : 'INCI / Ingredients:'} ${ingredients || '(not provided)'}
+${isDrug ? 'Therapeutic Indications:' : 'Key Claims / Benefits:'} ${claims || '(not provided)'}
+Current Indian Regulations: ${indianRegs}`
+
+  const exportSchema = `
+Return ONLY valid JSON matching this exact schema (no markdown, no prose):
+{
+  "markets": [
+    {
+      "country": "<country/region name>",
+      "country_code": "<as provided>",
+      "flag": "<emoji as provided>",
+      "regulation": "<regulation name>",
+      "overall_status": "COMPLIANT" | "GAPS_FOUND" | "REVIEW_REQUIRED",
+      "gap_count": <integer — count of FAIL + WARNING items>,
+      "summary": "<2-sentence overview of the export compliance picture for this market>",
+      "gaps": [
+        {
+          "field": "<label field or regulatory requirement>",
+          "status": "FAIL" | "WARNING" | "PASS",
+          "indian_requirement": "<what Indian regulations already require on the label>",
+          "target_requirement": "<what the target market requires — be specific, cite the regulation/article>",
+          "issue": "<the gap, difference, or risk>",
+          "recommendation": "<specific action needed to bridge this gap>"
+        }
+      ]
+    }
+  ]
+}
+
+Scoring rules:
+- overall_status = "COMPLIANT" if all gaps are PASS
+- overall_status = "GAPS_FOUND" if any gap is FAIL
+- overall_status = "REVIEW_REQUIRED" if only WARNINGs (no FAIL)
+- gap_count = count of FAIL + WARNING items only
+- Include PASS items only for the 3–4 most critical requirements to confirm they are already met`
+
+  return `You are a global regulatory affairs expert specialising in cosmetic and pharmaceutical labelling for Indian products exported internationally.
+
+Your task: For each target export market listed, identify the labelling and regulatory GAPS between what an Indian ${isDrug ? 'drug' : 'cosmetic'} product already includes (compliant with Indian regulations) and what is ADDITIONALLY required or DIFFERENT in that target market.
+
+Scope: Focus exclusively on LABELLING requirements — mandatory declarations, language, format, ingredient naming conventions, warning statements, registration/notification marks that affect the label, claims that are restricted, and any symbols/marks required.
+${productInfo}
+
+TARGET EXPORT MARKETS:
+${marketList}
+
+For each market, systematically analyse these areas:
+1. LANGUAGE — must the label be in the local language? Is English alone accepted?
+2. MANDATORY DECLARATIONS — any Indian declarations that differ in format or content in the target market
+3. ADDITIONAL DECLARATIONS — required by the target market but absent from Indian regs (e.g., CPNP notification number in EU, Responsible Person details)
+4. INGREDIENT RESTRICTIONS — any commonly restricted/banned substances relevant to this product category (flag as WARNING to verify against actual ingredient list)
+5. CLAIMS — any claims acceptable in India that are restricted, illegal, or require substantiation in the target market
+6. REGISTRATION / NOTIFICATION — requirements that generate a number or statement that must appear on the label
+7. FORMAT & TYPOGRAPHY — minimum font sizes, label language area %, any typographic requirements different from India
+8. MARKET-SPECIFIC MARKS/SYMBOLS — recycling symbols, language-specific icons, conformity marks
+
+Be specific — name the regulation article / directive / CFR section wherever possible.
+${exportSchema}`
+}
+
 // ── DRUG PROMPT ──────────────────────────────────────────────────────────
 function buildDrugPrompt({ regulations, styleRules, extraContext, productCategory, hasBack, logoSection = '', checkType = 'pre-print' }) {
   const regulationList = []
