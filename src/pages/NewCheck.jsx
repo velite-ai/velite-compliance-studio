@@ -17,6 +17,7 @@ import {
 import ScoreCircle from '../components/ScoreCircle'
 import VerdictBadge from '../components/VerdictBadge'
 import TrackBadge from '../components/TrackBadge'
+import CheckTypeBadge from '../components/CheckTypeBadge'
 
 const COSMETIC_REG_DEFAULTS = { cosmetics: true, weights: true, claims: true, ingredients: true }
 
@@ -26,8 +27,9 @@ export default function NewCheck() {
   const frontRef = useRef()
   const backRef  = useRef()
 
-  // ── Track ─────────────────────────────────────────────────────────────
-  const [track, setTrack] = useState('cosmetic')
+  // ── Track & check type ────────────────────────────────────────────────
+  const [track,     setTrack]     = useState('cosmetic')
+  const [checkType, setCheckType] = useState('pre-print')
 
   // ── Dual file upload ──────────────────────────────────────────────────
   const [frontFile,    setFrontFile]    = useState(null)
@@ -120,6 +122,7 @@ export default function NewCheck() {
         track,
         logoChecks,
         logoTogglesDefs: logoToggles,
+        checkType,
       })
       setResult(res)
     } catch (ex) {
@@ -156,6 +159,7 @@ export default function NewCheck() {
         product_name:       productName,
         product_category:   category || null,
         track,
+        check_type:         checkType,
         verdict:            result.verdict,
         score:              result.score,
         summary:            result.summary,
@@ -251,6 +255,32 @@ export default function NewCheck() {
               💊 Drug / OTC
             </button>
           </div>
+        </div>
+      </div>
+
+      {/* ── CHECK TYPE SELECTOR ── */}
+      <div className="check-type-card">
+        <div>
+          <div className="track-selector-label">Check Type</div>
+          <div style={{ fontSize: 12, color: 'var(--text-3)', marginTop: 2 }}>
+            {checkType === 'pre-print'
+              ? 'Pre-print: reviewing design proof or digital artwork before printing'
+              : 'Post-print: verifying a physically printed label or carton scan'}
+          </div>
+        </div>
+        <div className="track-toggle">
+          <button
+            className={`track-btn pre-print${checkType === 'pre-print' ? ' active' : ''}`}
+            onClick={() => setCheckType('pre-print')}
+          >
+            📐 Pre-Print
+          </button>
+          <button
+            className={`track-btn post-print${checkType === 'post-print' ? ' active' : ''}`}
+            onClick={() => setCheckType('post-print')}
+          >
+            🖨️ Post-Print
+          </button>
         </div>
       </div>
 
@@ -501,6 +531,7 @@ export default function NewCheck() {
                   <div style={{ marginTop: 6, display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
                     <VerdictBadge verdict={result.verdict} size="lg" />
                     <TrackBadge track={track} size="sm" />
+                    <CheckTypeBadge checkType={checkType} />
                     {backFile && <span className="badge badge-gray">Front + Back</span>}
                     {category && <span className="badge badge-gray">{category}</span>}
                   </div>

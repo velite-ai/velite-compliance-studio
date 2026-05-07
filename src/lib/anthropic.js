@@ -15,8 +15,9 @@ const ANTHROPIC_API_KEY = import.meta.env.VITE_ANTHROPIC_API_KEY
  * @param {Object} opts.regulations   - Active regulation toggle keys
  * @param {Array}  opts.styleRules    - Active style rules from DB
  * @param {string} opts.track         - 'cosmetic' | 'drug'
- * @param {Object} [opts.logoChecks]  - Active logo/mark check keys (optional)
- * @param {Array}  [opts.logoTogles]  - Full logo toggle definitions for enabled keys
+ * @param {Object} [opts.logoChecks]     - Active logo/mark check keys (optional)
+ * @param {Array}  [opts.logoTogglesDefs] - Full logo toggle definitions for enabled keys
+ * @param {string} [opts.checkType]       - 'pre-print' | 'post-print' (default: 'pre-print')
  */
 export async function analyseLabel({
   base64,
@@ -31,6 +32,7 @@ export async function analyseLabel({
   track = 'cosmetic',
   logoChecks = {},
   logoTogglesDefs = [],
+  checkType = 'pre-print',
 }) {
   const hasBack = Boolean(backBase64 && backMimeType)
 
@@ -39,8 +41,8 @@ export async function analyseLabel({
   const logoSection = buildLogoSection(activeLogoToggles)
 
   const systemPrompt = track === 'drug'
-    ? buildDrugPrompt({ regulations, styleRules, extraContext, productCategory, hasBack, logoSection })
-    : buildCosmeticPrompt({ regulations, styleRules, extraContext, productCategory, hasBack, logoSection })
+    ? buildDrugPrompt({ regulations, styleRules, extraContext, productCategory, hasBack, logoSection, checkType })
+    : buildCosmeticPrompt({ regulations, styleRules, extraContext, productCategory, hasBack, logoSection, checkType })
 
   // Build content array — front face always first, back face appended when available
   const userContent = []
@@ -276,6 +278,33 @@ Return ONLY valid JSON matching this exact schema:
 Score rubric: 100 = perfect, deduct 10 per FAIL item, 5 per WARNING item.
 verdict = "PASS" if score >= 80 and no FAIL items, "FAIL" if any FAIL items or score < 60, otherwise "REVIEW_REQUIRED".`
 
+// ── CHECK TYPE SECTION BUILDER ────────────────────────────────────────────
+function buildCheckTypeSection(checkType) {
+  if (checkType === 'post-print') {
+    return `
+CHECK TYPE: POST-PRINT — Physical Printed Label / Carton Verification
+You are reviewing a PHYSICALLY PRINTED LABEL or carton that has already been produced.
+Apply the following additional criteria on top of the standard compliance checks:
+- LEGIBILITY: All mandatory text must be clearly readable — not smudged, faded, misaligned, or too small. Flag illegible text as FAIL.
+- FONT SIZE: Minimum legal font sizes must be visibly met as ACTUALLY PRINTED (e.g., net quantity min 1mm for small packs). Flag apparent undersized text as FAIL.
+- PRINT QUALITY: Logos, marks (Rx, green dot, recycling symbol) must be clearly printed and not degraded by ink bleed, fading, or poor contrast. Flag poor-quality marks as WARNING (readable) or FAIL (not identifiable).
+- MRP, BATCH NUMBER, EXPIRY DATE must be clearly legible — if they appear to use variable-data printing and are present but unclear, flag as WARNING.
+- COLOUR: Where colour is regulatory (e.g., red band on Schedule H, green/brown dot marks), verify the colour appears correct and not faded.
+- Placeholder fields (blank batch/date areas) are FAIL in post-print — these MUST be filled on a printed label.
+- Barcode / QR code (if present): assess if it appears clearly printed and scannable.`
+  }
+  return `
+CHECK TYPE: PRE-PRINT — Design Proof / Digital Artwork
+You are reviewing a DIGITAL DESIGN FILE or ARTWORK PROOF before it goes to print.
+Apply the following criteria:
+- Focus on whether all mandatory declarations are PRESENT and correctly formatted.
+- Check text accuracy: INCI names, regulatory text, licence numbers, addresses.
+- For font sizes: assess from the design whether sizes appear to meet minimum legal requirements — flag as WARNING if uncertain.
+- Do NOT penalise for print quality issues — this is a digital file.
+- Blank placeholder fields (e.g., "Batch No.: ___", "Exp. Date: ___") are expected — flag as WARNING (not FAIL) since they will be filled at the time of printing.
+- Concentrate on compliance of the designed text content, layout completeness, and presence of all required marks.`
+}
+
 // ── LOGO SECTION BUILDER ─────────────────────────────────────────────────
 function buildLogoSection(activeToggles) {
   if (!activeToggles || activeToggles.length === 0) return ''
@@ -289,7 +318,7 @@ ${lines}`
 }
 
 // ── COSMETIC PROMPT ──────────────────────────────────────────────────────
-function buildCosmeticPrompt({ regulations, styleRules, extraContext, productCategory, hasBack, logoSection = '' }) {
+function buildCosmeticPrompt({ regulations, styleRules, extraContext, productCategory, hasBack, logoSection = '', checkType = 'pre-print' }) {
   const regulationList = []
   if (regulations.cosmetics)
     regulationList.push('Cosmetics Rules 2020 (India) — all mandatory label declarations')
@@ -350,6 +379,7 @@ Analyse the label image(s) provided and produce a structured compliance report i
 TRACK: COSMETIC — regulated under Cosmetics Rules 2020 & Legal Metrology Rules 2011.
 FACES PROVIDED: ${hasBack ? 'Front + Back' : 'Front only'}
 ${faceNote}
+${buildCheckTypeSection(checkType)}
 
 REGULATIONS TO CHECK:
 ${regulationList.map((r, i) => `${i + 1}. ${r}`).join('\n')}
@@ -361,7 +391,7 @@ ${JSON_SCHEMA}`
 }
 
 // ── DRUG PROMPT ──────────────────────────────────────────────────────────
-function buildDrugPrompt({ regulations, styleRules, extraContext, productCategory, hasBack, logoSection = '' }) {
+function buildDrugPrompt({ regulations, styleRules, extraContext, productCategory, hasBack, logoSection = '', checkType = 'pre-print' }) {
   const regulationList = []
   if (regulations.drug_act)
     regulationList.push(
@@ -425,6 +455,7 @@ Analyse the drug label image(s) provided and produce a structured compliance rep
 TRACK: DRUG — regulated under Drugs & Cosmetics Act 1940 and Drugs & Cosmetics Rules 1945.
 FACES PROVIDED: ${hasBack ? 'Front + Back' : 'Front only'}
 ${faceNote}
+${buildCheckTypeSection(checkType)}
 
 REGULATIONS TO CHECK:
 ${regulationList.map((r, i) => `${i + 1}. ${r}`).join('\n')}

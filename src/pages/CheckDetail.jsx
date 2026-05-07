@@ -5,6 +5,7 @@ import { useAuth } from '../context/AuthContext'
 import ScoreCircle from '../components/ScoreCircle'
 import VerdictBadge from '../components/VerdictBadge'
 import TrackBadge from '../components/TrackBadge'
+import CheckTypeBadge from '../components/CheckTypeBadge'
 import { format, parseISO } from 'date-fns'
 
 export default function CheckDetail() {
@@ -189,7 +190,8 @@ export default function CheckDetail() {
             <div className="result-product">{check.product_name}</div>
             <div style={{ display: 'flex', gap: 8, marginTop: 6, flexWrap: 'wrap', alignItems: 'center' }}>
               <VerdictBadge verdict={check.verdict} size="lg" />
-              {check.track && <TrackBadge track={check.track} />}
+              {check.track      && <TrackBadge     track={check.track}           />}
+              {check.check_type && <CheckTypeBadge checkType={check.check_type} />}
               {check.product_category && <span className="badge badge-gray">{check.product_category}</span>}
               {check.is_approved && <span className="badge badge-pass">✓ Approved</span>}
               {markers.length > 0 && (

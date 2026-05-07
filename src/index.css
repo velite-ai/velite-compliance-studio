@@ -1111,6 +1111,41 @@ tr:hover td { background: var(--surface-2); }
 }
 
 /* ══════════════════════════════════════════════
+   MODULE 3E — PRE/POST PRINT CHECK TYPE
+   ══════════════════════════════════════════════ */
+
+/* Compact secondary card for check type — sits below the track selector */
+.check-type-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px 16px;
+  margin-bottom: 16px;
+  box-shadow: var(--shadow);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+/* Pre-print active state — purple/review */
+.track-btn.pre-print.active {
+  background: var(--review-bg);
+  color: var(--review);
+  border: 1px solid var(--review-border);
+  box-shadow: var(--shadow);
+}
+
+/* Post-print active state — green/pass */
+.track-btn.post-print.active {
+  background: var(--pass-bg);
+  color: var(--pass);
+  border: 1px solid var(--pass-border);
+  box-shadow: var(--shadow);
+}
+
+/* ══════════════════════════════════════════════
    MODULE 3C — ANNOTATION LAYER
    ══════════════════════════════════════════════ */
 
