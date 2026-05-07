@@ -47,6 +47,12 @@ export default function NewCheck() {
   const [logoChecks,   setLogoChecks]   = useState(COSMETIC_LOGO_DEFAULTS)
   const [styleRules,   setStyleRules]   = useState([])
 
+  // ── Project & memory state ────────────────────────────────────────────
+  const [projects,          setProjects]          = useState([])
+  const [projectId,         setProjectId]         = useState(null)
+  const [openMemoryIssues,  setOpenMemoryIssues]  = useState([])
+  const [activeGuidelines,  setActiveGuidelines]  = useState([])
+
   // ── Async state ───────────────────────────────────────────────────────
   const [analysing, setAnalysing] = useState(false)
   const [saving,    setSaving]    = useState(false)
@@ -55,10 +61,28 @@ export default function NewCheck() {
   const [error,     setError]     = useState('')
 
   useEffect(() => {
+    // Load active style rules
     supabase.from('style_rules').select('*').eq('is_active', true).then(({ data }) => {
       if (data) setStyleRules(data)
     })
+    // Load user projects for the selector
+    supabase.from('projects').select('id, product_name, track, category').eq('is_archived', false)
+      .order('updated_at', { ascending: false }).then(({ data }) => {
+      if (data) setProjects(data)
+    })
+    // Load active internal guidelines
+    supabase.from('internal_guidelines').select('title, summary, full_content, category, applies_to_track')
+      .eq('is_active', true).then(({ data }) => {
+      if (data) setActiveGuidelines(data)
+    })
   }, [])
+
+  // Load product memory when project changes
+  useEffect(() => {
+    if (!projectId) { setOpenMemoryIssues([]); return }
+    supabase.from('product_memory').select('*').eq('project_id', projectId).eq('is_resolved', false)
+      .then(({ data }) => { setOpenMemoryIssues(data || []) })
+  }, [projectId])
 
   // Reset category + regs when track changes
   function switchTrack(newTrack) {
@@ -109,6 +133,11 @@ export default function NewCheck() {
       const frontBase64 = await fileToBase64(frontFile)
       const backBase64  = backFile ? await fileToBase64(backFile) : null
 
+      // Filter guidelines relevant to this track
+      const relevantGuidelines = activeGuidelines.filter(
+        g => g.applies_to_track === 'both' || g.applies_to_track === track
+      )
+
       const res = await analyseLabel({
         base64:      frontBase64,
         mimeType:    frontFile.type,
@@ -123,6 +152,8 @@ export default function NewCheck() {
         logoChecks,
         logoTogglesDefs: logoToggles,
         checkType,
+        openIssues:  openMemoryIssues,
+        guidelines:  relevantGuidelines,
       })
       setResult(res)
     } catch (ex) {
@@ -173,6 +204,8 @@ export default function NewCheck() {
         label_file_path:    frontPath,
         label_file_name:    frontFile.name,
         extra_context:      extraContext || null,
+        // Project link
+        project_id:         projectId || null,
       }).select().single()
 
       if (insErr) throw insErr
@@ -187,8 +220,39 @@ export default function NewCheck() {
           is_active: true,
           created_by: user.id,
           check_id: check.id,
+          project_id: projectId || null,
         }))
         await supabase.from('style_rules').insert(rules)
+      }
+
+      // ── Product memory update ────────────────────────────────────────
+      if (projectId && result.items?.length) {
+        const passFields = result.items.filter(i => i.status === 'PASS').map(i => i.field)
+        const failFields = result.items.filter(i => i.status === 'FAIL').map(i => i.field)
+
+        // Auto-resolve memory issues that now pass
+        const toResolve = openMemoryIssues.filter(m => passFields.includes(m.field))
+        if (toResolve.length) {
+          await supabase.from('product_memory')
+            .update({ is_resolved: true })
+            .in('id', toResolve.map(m => m.id))
+        }
+
+        // Add new FAIL items not already in memory
+        const trackedFields = openMemoryIssues.map(m => m.field)
+        const newFails = result.items.filter(
+          i => i.status === 'FAIL' && !trackedFields.includes(i.field)
+        )
+        if (newFails.length) {
+          await supabase.from('product_memory').insert(newFails.map(item => ({
+            project_id:      projectId,
+            issue_title:     item.field,
+            regulation:      item.regulation || null,
+            field:           item.field,
+            original_finding: item.issue || item.found || '',
+            is_resolved:     false,
+          })))
+        }
       }
 
       setSavedId(check.id)
@@ -282,6 +346,33 @@ export default function NewCheck() {
             🖨️ Post-Print
           </button>
         </div>
+      </div>
+
+      {/* ── PROJECT LINK ── */}
+      <div className="check-type-card" style={{ gap: 12, flexWrap: 'wrap' }}>
+        <div style={{ flex: 1, minWidth: 180 }}>
+          <div className="track-selector-label">Link to Project</div>
+          <div style={{ fontSize: 12, color: 'var(--text-3)', marginTop: 2 }}>
+            {projectId
+              ? openMemoryIssues.length > 0
+                ? `🧠 ${openMemoryIssues.length} open issue${openMemoryIssues.length !== 1 ? 's' : ''} from previous versions will be verified`
+                : '✓ No unresolved issues from previous versions'
+              : 'Optional — link this check to a project to enable product memory and version tracking'}
+          </div>
+        </div>
+        <select
+          className="form-select"
+          value={projectId || ''}
+          onChange={e => setProjectId(e.target.value || null)}
+          style={{ minWidth: 220, maxWidth: 320 }}
+        >
+          <option value="">— No project (standalone check) —</option>
+          {projects.map(p => (
+            <option key={p.id} value={p.id}>
+              {p.product_name}{p.category ? ` · ${p.category}` : ''}
+            </option>
+          ))}
+        </select>
       </div>
 
       {/* ── MAIN 2-COL GRID ── */}
@@ -436,6 +527,11 @@ export default function NewCheck() {
               {styleRules.length > 0 && (
                 <p style={{ fontSize: 11, color: 'var(--pass)', marginTop: 10 }}>
                   ✓ {styleRules.length} Velite style rule{styleRules.length !== 1 ? 's' : ''} will also be applied
+                </p>
+              )}
+              {activeGuidelines.filter(g => g.applies_to_track === 'both' || g.applies_to_track === track).length > 0 && (
+                <p style={{ fontSize: 11, color: 'var(--accent)', marginTop: 4 }}>
+                  📚 {activeGuidelines.filter(g => g.applies_to_track === 'both' || g.applies_to_track === track).length} internal guideline{activeGuidelines.filter(g => g.applies_to_track === 'both' || g.applies_to_track === track).length !== 1 ? 's' : ''} injected
                 </p>
               )}
             </div>

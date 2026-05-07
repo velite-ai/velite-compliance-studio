@@ -8,6 +8,7 @@ import TrackBadge from '../components/TrackBadge'
 import CheckTypeBadge from '../components/CheckTypeBadge'
 import { format, parseISO } from 'date-fns'
 import { generateCompliancePDF, generateDesignerBriefPDF, generateAnnotatedJPEG } from '../lib/reports'
+import { learnStyleRulesFromLabel } from '../lib/anthropic'
 
 export default function CheckDetail() {
   const { id } = useParams()
@@ -35,6 +36,10 @@ export default function CheckDetail() {
 
   // ── Reports state ──────────────────────────────────────────────────────
   const [generatingReport, setGeneratingReport] = useState(null) // 'compliance' | 'brief' | 'jpeg' | null
+
+  // ── Auto-learn state ──────────────────────────────────────────────────
+  const [learningRules, setLearningRules] = useState(false)
+  const [learnedCount,  setLearnedCount]  = useState(null) // number | null
 
   useEffect(() => { load() }, [id])
 
@@ -72,6 +77,58 @@ export default function CheckDetail() {
     }).eq('id', id)
     setCheck(c => ({ ...c, is_approved: true, approved_at: new Date().toISOString() }))
     setApproving(false)
+
+    // 7B: Auto-learn style rules from the approved label image
+    if (frontUrl) {
+      setLearningRules(true)
+      try {
+        const { base64, mimeType } = await urlToBase64(frontUrl)
+        // Fetch existing rule titles to avoid duplicates
+        const { data: existingRules } = await supabase
+          .from('style_rules').select('title').eq('is_active', true)
+        const existingTitles = (existingRules || []).map(r => r.title)
+
+        const { rules } = await learnStyleRulesFromLabel({
+          check,
+          base64,
+          mimeType,
+          existingRuleTitles: existingTitles,
+        })
+
+        if (rules?.length) {
+          await supabase.from('style_rules').insert(rules.map(r => ({
+            category:          r.category || 'general',
+            title:             r.title,
+            description:       r.description,
+            example_correct:   r.example_correct || null,
+            example_incorrect: r.example_incorrect || null,
+            source:            'auto-learned',
+            is_active:         true,
+            created_by:        user?.id,
+            check_id:          id,
+            project_id:        check.project_id || null,
+          })))
+          setLearnedCount(rules.length)
+        } else {
+          setLearnedCount(0)
+        }
+      } catch (e) {
+        console.error('Auto-learn failed:', e)
+        setLearnedCount(0)
+      }
+      setLearningRules(false)
+    }
+  }
+
+  async function urlToBase64(url) {
+    const res  = await fetch(url)
+    const blob = await res.blob()
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader()
+      reader.onload  = () => resolve({ base64: reader.result.split(',')[1], mimeType: blob.type })
+      reader.onerror = reject
+      reader.readAsDataURL(blob)
+    })
   }
 
   async function saveNotes() {
@@ -215,6 +272,19 @@ export default function CheckDetail() {
         <div className="approved-banner">
           ✓ Approved on {check.approved_at ? format(parseISO(check.approved_at), 'dd MMM yyyy') : ''}
           {check.notes && <span style={{ fontSize: 11, color: 'var(--pass)', marginLeft: 8 }}>· Notes saved</span>}
+          {learningRules && (
+            <span style={{ fontSize: 11, color: 'var(--accent)', marginLeft: 12 }}>
+              <span className="spinner" style={{ width: 10, height: 10, borderWidth: 2, marginRight: 4 }} />
+              Learning style rules from this label…
+            </span>
+          )}
+          {!learningRules && learnedCount !== null && (
+            <span style={{ fontSize: 11, color: learnedCount > 0 ? 'var(--accent)' : 'var(--text-3)', marginLeft: 12 }}>
+              {learnedCount > 0
+                ? `✨ ${learnedCount} new style rule${learnedCount !== 1 ? 's' : ''} learned → Style Guide`
+                : '◉ No new style rules extracted'}
+            </span>
+          )}
         </div>
       )}
 

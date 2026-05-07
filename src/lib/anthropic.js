@@ -33,6 +33,8 @@ export async function analyseLabel({
   logoChecks = {},
   logoTogglesDefs = [],
   checkType = 'pre-print',
+  openIssues  = [],   // [{issue_title, field, original_finding, regulation}] — product memory
+  guidelines  = [],   // [{title, full_content, summary, category}] — internal guidelines
 }) {
   const hasBack = Boolean(backBase64 && backMimeType)
 
@@ -41,8 +43,8 @@ export async function analyseLabel({
   const logoSection = buildLogoSection(activeLogoToggles)
 
   const systemPrompt = track === 'drug'
-    ? buildDrugPrompt({ regulations, styleRules, extraContext, productCategory, hasBack, logoSection, checkType })
-    : buildCosmeticPrompt({ regulations, styleRules, extraContext, productCategory, hasBack, logoSection, checkType })
+    ? buildDrugPrompt({ regulations, styleRules, extraContext, productCategory, hasBack, logoSection, checkType, openIssues, guidelines })
+    : buildCosmeticPrompt({ regulations, styleRules, extraContext, productCategory, hasBack, logoSection, checkType, openIssues, guidelines })
 
   // Build content array — front face always first, back face appended when available
   const userContent = []
@@ -318,7 +320,7 @@ ${lines}`
 }
 
 // ── COSMETIC PROMPT ──────────────────────────────────────────────────────
-function buildCosmeticPrompt({ regulations, styleRules, extraContext, productCategory, hasBack, logoSection = '', checkType = 'pre-print' }) {
+function buildCosmeticPrompt({ regulations, styleRules, extraContext, productCategory, hasBack, logoSection = '', checkType = 'pre-print', openIssues = [], guidelines = [] }) {
   const regulationList = []
   if (regulations.cosmetics)
     regulationList.push('Cosmetics Rules 2020 (India) — all mandatory label declarations')
@@ -373,6 +375,24 @@ MANDATORY DECLARATIONS CHECKLIST (Cosmetics Rules 2020 + Legal Metrology):
     ? 'Both the FRONT and BACK faces of the label/carton have been provided. Check mandatory declarations across BOTH faces — a field is compliant if it appears on either face.'
     : 'Only the FRONT face of the label has been provided. Note any fields that are typically on the back face as "Not visible — back face not uploaded" (WARNING, not FAIL).'
 
+  // ── Internal guidelines section ───────────────────────────────────────
+  let guidelinesSection = ''
+  if (guidelines && guidelines.length > 0) {
+    guidelinesSection = `\n\nINTERNAL VELITE GUIDELINES — MUST BE ENFORCED\nThe following are Velite Healthcare's internal packaging SOPs and brand standards. Treat any deviations as compliance issues:\n`
+    guidelines.forEach((g, i) => {
+      guidelinesSection += `\n[Guideline ${i + 1}: ${g.title}]\n${g.full_content || g.summary || ''}\n`
+    })
+  }
+
+  // ── Product memory section ─────────────────────────────────────────────
+  let memorySection = ''
+  if (openIssues && openIssues.length > 0) {
+    memorySection = `\n\nPRODUCT MEMORY — VERIFY THESE PREVIOUSLY IDENTIFIED ISSUES\nThe following issues were found in prior versions of this product's label. For EACH, explicitly check whether it has been fixed — if resolved use PASS, if still present use FAIL:\n`
+    openIssues.forEach((issue, i) => {
+      memorySection += `${i + 1}. Field: "${issue.field || issue.issue_title}" — Previous finding: "${issue.original_finding || ''}" [Regulation: ${issue.regulation || 'General'}]\n`
+    })
+  }
+
   return `You are a regulatory compliance expert specialising in Indian cosmetics packaging regulations.
 Analyse the label image(s) provided and produce a structured compliance report in valid JSON only — no markdown, no prose outside the JSON.
 
@@ -385,6 +405,8 @@ REGULATIONS TO CHECK:
 ${regulationList.map((r, i) => `${i + 1}. ${r}`).join('\n')}
 ${mandatoryChecklist}
 ${styleSection}
+${guidelinesSection}
+${memorySection}
 ${extraContext ? `\nADDITIONAL CONTEXT FROM USER:\n${extraContext}` : ''}
 ${logoSection}
 ${JSON_SCHEMA}`
@@ -523,7 +545,7 @@ ${exportSchema}`
 }
 
 // ── DRUG PROMPT ──────────────────────────────────────────────────────────
-function buildDrugPrompt({ regulations, styleRules, extraContext, productCategory, hasBack, logoSection = '', checkType = 'pre-print' }) {
+function buildDrugPrompt({ regulations, styleRules, extraContext, productCategory, hasBack, logoSection = '', checkType = 'pre-print', openIssues = [], guidelines = [] }) {
   const regulationList = []
   if (regulations.drug_act)
     regulationList.push(
@@ -601,6 +623,26 @@ IMPORTANT DRUG-SPECIFIC RULES:
 - If drug is Schedule H, H1, or X, the declaration text must appear verbatim as per Rules — paraphrasing is a FAIL
 - MRP must follow Legal Metrology format exactly
 - DLN (Drugs Licence Number) is mandatory — absence is a FAIL
+${(() => {
+  let guidelinesSection = ''
+  if (guidelines && guidelines.length > 0) {
+    guidelinesSection = `\n\nINTERNAL VELITE GUIDELINES — MUST BE ENFORCED\nThe following are Velite Healthcare's internal packaging SOPs and brand standards. Treat any deviations as compliance issues:\n`
+    guidelines.forEach((g, i) => {
+      guidelinesSection += `\n[Guideline ${i + 1}: ${g.title}]\n${g.full_content || g.summary || ''}\n`
+    })
+  }
+  return guidelinesSection
+})()}
+${(() => {
+  let memorySection = ''
+  if (openIssues && openIssues.length > 0) {
+    memorySection = `\n\nPRODUCT MEMORY — VERIFY THESE PREVIOUSLY IDENTIFIED ISSUES\nThe following issues were found in prior versions of this product's label. For EACH, explicitly check whether it has been fixed — if resolved use PASS, if still present use FAIL:\n`
+    openIssues.forEach((issue, i) => {
+      memorySection += `${i + 1}. Field: "${issue.field || issue.issue_title}" — Previous finding: "${issue.original_finding || ''}" [Regulation: ${issue.regulation || 'General'}]\n`
+    })
+  }
+  return memorySection
+})()}
 ${logoSection}
 ${JSON_SCHEMA}`
 }
@@ -686,6 +728,89 @@ Return this exact schema:
       max_tokens: 2048,
       system: systemPrompt,
       messages: [{ role: 'user', content: userContent }],
+    }),
+  })
+
+  if (!response.ok) {
+    const err = await response.text()
+    throw new Error(`Claude API error: ${response.status} — ${err}`)
+  }
+
+  const data    = await response.json()
+  const raw     = data.content?.[0]?.text || ''
+  const cleaned = raw.replace(/^```json\s*/i, '').replace(/```\s*$/i, '').trim()
+  return JSON.parse(cleaned)
+}
+
+// ── AUTO-LEARN STYLE RULES FROM APPROVED LABEL ────────────────────────────
+/**
+ * Analyse an approved label image and extract reusable Velite style rules.
+ * Called automatically after a check is approved.
+ *
+ * @param {Object}  opts
+ * @param {Object}  opts.check              - The check record
+ * @param {string}  opts.base64             - Base64 image of approved label
+ * @param {string}  opts.mimeType           - Image MIME type
+ * @param {Array}   opts.existingRuleTitles - Titles of already-saved rules (to avoid dupes)
+ *
+ * Returns: { rules: [{ category, title, description, example_correct, example_incorrect }] }
+ */
+export async function learnStyleRulesFromLabel({ check, base64, mimeType, existingRuleTitles = [] }) {
+  const existingList = existingRuleTitles.length
+    ? `\nAlready-saved rules (do NOT duplicate these):\n${existingRuleTitles.map((t, i) => `${i + 1}. ${t}`).join('\n')}`
+    : ''
+
+  const systemPrompt = `You are a packaging style analyst for Velite Healthcare (India).
+This is a label that has been APPROVED as fully compliant. Your task is to extract 3–7 reusable Velite brand style rules from the patterns you observe on this label.
+
+FOCUS ON EXTRACTING:
+- Typography conventions (font hierarchy, size patterns, weight usage)
+- Colour usage (brand green/amber, background colours)
+- Layout conventions (element placement, spacing, section order)
+- Text formatting patterns (how MRP, dates, addresses are formatted)
+- Claims and tone conventions
+- Ingredient list formatting style
+
+DO NOT extract:
+- Rules that just restate a regulation (e.g. "INCI names required") — those are already enforced
+- Rules about specific product details (batch numbers, specific ingredients)
+- Generic rules already implied by regulation compliance
+${existingList}
+
+IMPORTANT: Return 0 rules if nothing genuinely distinctive is visible beyond regulatory compliance.
+
+Return ONLY valid JSON:
+{
+  "rules": [
+    {
+      "category": "typography" | "layout" | "claims" | "ingredients" | "brand" | "general",
+      "title": "<concise rule title, max 60 chars>",
+      "description": "<clear description of the standard to enforce, max 200 chars>",
+      "example_correct": "<what correct looks like on this label, or empty string>",
+      "example_incorrect": "<what to avoid, or empty string>"
+    }
+  ]
+}`
+
+  const response = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': ANTHROPIC_API_KEY,
+      'anthropic-version': '2023-06-01',
+      'anthropic-dangerous-direct-browser-access': 'true',
+    },
+    body: JSON.stringify({
+      model: 'claude-opus-4-5',
+      max_tokens: 1536,
+      system: systemPrompt,
+      messages: [{
+        role: 'user',
+        content: [
+          { type: 'image', source: { type: 'base64', media_type: mimeType, data: base64 } },
+          { type: 'text', text: `Extract style rules from this approved ${check.track || 'cosmetic'} label for "${check.product_name || 'product'}". Return only the JSON.` },
+        ],
+      }],
     }),
   })
 
