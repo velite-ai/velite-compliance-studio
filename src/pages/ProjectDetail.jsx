@@ -417,18 +417,324 @@ export default function ProjectDetail() {
         </div>
       )}
 
-      {/* ASSETS TAB — placeholder for Module 5 */}
+      {/* ASSETS TAB — Module 5 */}
       {tab === 'assets' && (
+        <AssetsTab projectId={id} userId={user?.id} />
+      )}
+    </div>
+  )
+}
+
+// ── ASSET TYPES ──────────────────────────────────────────────────────────
+const ASSET_TYPES = [
+  { value: 'artwork_front',     label: 'Artwork – Front Face',  icon: '🖼️' },
+  { value: 'artwork_back',      label: 'Artwork – Back Face',   icon: '🖼️' },
+  { value: 'label_front',       label: 'Label – Front',         icon: '🏷️' },
+  { value: 'label_back',        label: 'Label – Back',          icon: '🏷️' },
+  { value: 'cdr',               label: 'CDR / Vector File',     icon: '🎨' },
+  { value: 'render_3d',         label: '3D Render',             icon: '🧊' },
+  { value: 'insert',            label: 'Package Insert',        icon: '📄' },
+  { value: 'compliance_report', label: 'Compliance Report',     icon: '📊' },
+  { value: 'designer_brief',    label: 'Designer Brief',        icon: '📝' },
+  { value: 'annotated_image',   label: 'Annotated Image',       icon: '📍' },
+  { value: 'other',             label: 'Other',                 icon: '📁' },
+]
+
+function fmtSize(bytes) {
+  if (!bytes) return '—'
+  if (bytes < 1024)        return `${bytes} B`
+  if (bytes < 1048576)     return `${(bytes / 1024).toFixed(1)} KB`
+  return `${(bytes / 1048576).toFixed(1)} MB`
+}
+
+// ── ASSETS TAB ────────────────────────────────────────────────────────────
+function AssetsTab({ projectId, userId }) {
+  const [assets,      setAssets]      = useState([])
+  const [loading,     setLoading]     = useState(true)
+  const [previews,    setPreviews]    = useState({})   // id → signedUrl for images
+  const [filter,      setFilter]      = useState('all')
+
+  // Upload form
+  const [uploadFiles, setUploadFiles] = useState([])
+  const [uploadType,  setUploadType]  = useState('artwork_front')
+  const [uploadNotes, setUploadNotes] = useState('')
+  const [uploading,   setUploading]   = useState(false)
+  const [uploadError, setUploadError] = useState(null)
+
+  // Drag & drop
+  const [dragging, setDragging] = useState(false)
+
+  useEffect(() => { loadAssets() }, [projectId])
+
+  async function loadAssets() {
+    setLoading(true)
+    const { data } = await supabase
+      .from('assets')
+      .select('*')
+      .eq('project_id', projectId)
+      .order('created_at', { ascending: false })
+
+    const list = data || []
+    setAssets(list)
+
+    // Generate signed URLs for image previews
+    const imgAssets = list.filter(a => a.mime_type?.startsWith('image/'))
+    if (imgAssets.length > 0) {
+      const urls = {}
+      await Promise.all(imgAssets.map(async a => {
+        const { data: d } = await supabase.storage.from('assets').createSignedUrl(a.file_path, 3600)
+        if (d?.signedUrl) urls[a.id] = d.signedUrl
+      }))
+      setPreviews(urls)
+    }
+    setLoading(false)
+  }
+
+  async function handleUpload() {
+    if (!uploadFiles.length) return
+    setUploading(true)
+    setUploadError(null)
+    try {
+      for (const file of uploadFiles) {
+        const uid      = crypto.randomUUID().slice(0, 8)
+        const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_')
+        const path     = `${projectId}/${uploadType}/${uid}_${safeName}`
+
+        const { error: storageErr } = await supabase.storage.from('assets').upload(path, file)
+        if (storageErr) throw new Error(`Upload failed: ${storageErr.message}`)
+
+        const { error: dbErr } = await supabase.from('assets').insert({
+          project_id:      projectId,
+          file_name:       file.name,
+          file_path:       path,
+          asset_type:      uploadType,
+          mime_type:       file.type || null,
+          file_size_bytes: file.size || null,
+          notes:           uploadNotes.trim() || null,
+          uploaded_by:     userId,
+        })
+        if (dbErr) throw new Error(`DB insert failed: ${dbErr.message}`)
+      }
+      setUploadFiles([])
+      setUploadNotes('')
+      await loadAssets()
+    } catch (e) {
+      setUploadError(e.message)
+    } finally {
+      setUploading(false)
+    }
+  }
+
+  async function handleDelete(asset) {
+    if (!confirm(`Delete "${asset.file_name}"? This cannot be undone.`)) return
+    await supabase.storage.from('assets').remove([asset.file_path])
+    await supabase.from('assets').delete().eq('id', asset.id)
+    setAssets(prev => prev.filter(a => a.id !== asset.id))
+    setPreviews(prev => { const n = { ...prev }; delete n[asset.id]; return n })
+  }
+
+  async function handleDownload(asset) {
+    const { data } = await supabase.storage.from('assets').createSignedUrl(asset.file_path, 60)
+    if (data?.signedUrl) window.open(data.signedUrl, '_blank')
+  }
+
+  function onDrop(e) {
+    e.preventDefault()
+    setDragging(false)
+    const files = Array.from(e.dataTransfer.files)
+    if (files.length) setUploadFiles(files)
+  }
+
+  const typeCounts    = assets.reduce((acc, a) => { acc[a.asset_type] = (acc[a.asset_type] || 0) + 1; return acc }, {})
+  const presentTypes  = ASSET_TYPES.filter(t => typeCounts[t.value] > 0)
+  const filteredAssets = filter === 'all' ? assets : assets.filter(a => a.asset_type === filter)
+
+  if (loading) return (
+    <div style={{ padding: 40, textAlign: 'center' }}>
+      <span className="spinner" />
+    </div>
+  )
+
+  return (
+    <div>
+      {/* Upload card */}
+      <div className="card" style={{ marginBottom: 16 }}>
+        <div className="card-header">
+          <span className="card-title">Upload Files</span>
+          <span style={{ fontSize: 11, color: 'var(--text-3)' }}>Images, PDFs, CDR, AI, EPS, OBJ, GLB — up to 50 MB each</span>
+        </div>
+        <div className="card-body">
+          {/* Drop zone */}
+          <div
+            className={`asset-dropzone${dragging ? ' dragging' : ''}${uploadFiles.length ? ' has-files' : ''}`}
+            onDragOver={e => { e.preventDefault(); setDragging(true) }}
+            onDragLeave={() => setDragging(false)}
+            onDrop={onDrop}
+            onClick={() => document.getElementById('asset-file-input').click()}
+          >
+            <input
+              id="asset-file-input"
+              type="file"
+              multiple
+              style={{ display: 'none' }}
+              onChange={e => setUploadFiles(Array.from(e.target.files))}
+            />
+            {uploadFiles.length > 0 ? (
+              <div>
+                <div style={{ fontSize: 18, marginBottom: 6 }}>
+                  📎 {uploadFiles.length} file{uploadFiles.length !== 1 ? 's' : ''} ready
+                </div>
+                <div style={{ fontSize: 11, color: 'var(--text-3)', maxWidth: 400, margin: '0 auto' }}>
+                  {uploadFiles.map(f => f.name).join(' · ')}
+                </div>
+              </div>
+            ) : (
+              <div>
+                <div style={{ fontSize: 32, marginBottom: 10 }}>☁️</div>
+                <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 4 }}>Drop files here or click to browse</div>
+                <div style={{ fontSize: 12, color: 'var(--text-3)' }}>
+                  Artwork, CDR, 3D renders, inserts, and more
+                </div>
+              </div>
+            )}
+          </div>
+
+          <div className="grid-2" style={{ gap: 12, marginTop: 12 }}>
+            <div>
+              <label className="form-label">File Category</label>
+              <select className="form-select" value={uploadType} onChange={e => setUploadType(e.target.value)}>
+                {ASSET_TYPES.map(t => (
+                  <option key={t.value} value={t.value}>{t.icon} {t.label}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="form-label">
+                Notes <span style={{ fontWeight: 400, color: 'var(--text-3)' }}>(optional)</span>
+              </label>
+              <input
+                className="form-input"
+                placeholder="e.g. v3 final, approved by design team"
+                value={uploadNotes}
+                onChange={e => setUploadNotes(e.target.value)}
+              />
+            </div>
+          </div>
+
+          {uploadError && (
+            <div style={{ marginTop: 10, padding: '9px 12px', background: 'var(--fail-bg)', border: '1px solid var(--fail-border)', borderRadius: 6, fontSize: 12, color: 'var(--fail)' }}>
+              ⚠️ {uploadError}
+              {uploadError.includes('bucket') && (
+                <div style={{ marginTop: 4, opacity: .8 }}>
+                  The <strong>assets</strong> Storage bucket may not exist yet — create it in Supabase Dashboard → Storage → New Bucket (name: <code>assets</code>).
+                </div>
+              )}
+            </div>
+          )}
+
+          <button
+            className="btn btn-primary"
+            style={{ marginTop: 12, opacity: (!uploadFiles.length || uploading) ? .5 : 1 }}
+            disabled={!uploadFiles.length || uploading}
+            onClick={handleUpload}
+          >
+            {uploading ? (
+              <><span className="spinner" style={{ width: 13, height: 13, marginRight: 7 }} />Uploading…</>
+            ) : (
+              `⬆ Upload ${uploadFiles.length > 0 ? `${uploadFiles.length} File${uploadFiles.length !== 1 ? 's' : ''}` : ''}`
+            )}
+          </button>
+        </div>
+      </div>
+
+      {/* Asset list */}
+      {assets.length === 0 ? (
         <div className="card">
           <div className="empty-state">
             <div className="empty-icon">📁</div>
-            <h3>Asset Library</h3>
-            <p>Upload artwork, CDR files, 3D renders, and inserts here.<br />
-              <span style={{ fontSize: 11, color: 'var(--text-3)' }}>Coming in Module 5</span>
-            </p>
+            <h3>No assets yet</h3>
+            <p>Upload artwork, CDR files, 3D renders, and package inserts using the form above.</p>
+          </div>
+        </div>
+      ) : (
+        <div className="card">
+          <div className="card-header" style={{ flexWrap: 'wrap', gap: 8 }}>
+            <span className="card-title">Files ({assets.length})</span>
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+              <button className={`filter-chip${filter === 'all' ? ' active' : ''}`} onClick={() => setFilter('all')}>
+                All ({assets.length})
+              </button>
+              {presentTypes.map(t => (
+                <button
+                  key={t.value}
+                  className={`filter-chip${filter === t.value ? ' active' : ''}`}
+                  onClick={() => setFilter(t.value)}
+                >
+                  {t.icon} {t.label.split(' – ')[0].split(' / ')[0]} ({typeCounts[t.value]})
+                </button>
+              ))}
+            </div>
+          </div>
+          <div style={{ padding: 0 }}>
+            {filteredAssets.map((asset, i) => (
+              <AssetRow
+                key={asset.id}
+                asset={asset}
+                preview={previews[asset.id]}
+                onDownload={() => handleDownload(asset)}
+                onDelete={() => handleDelete(asset)}
+                isLast={i === filteredAssets.length - 1}
+              />
+            ))}
           </div>
         </div>
       )}
+    </div>
+  )
+}
+
+// ── ASSET ROW ─────────────────────────────────────────────────────────────
+function AssetRow({ asset, preview, onDownload, onDelete, isLast }) {
+  const typeInfo = ASSET_TYPES.find(t => t.value === asset.asset_type) || ASSET_TYPES[ASSET_TYPES.length - 1]
+
+  return (
+    <div className={`asset-row${isLast ? ' last' : ''}`}>
+      {/* Thumbnail or icon */}
+      <div className="asset-thumb">
+        {preview ? (
+          <img src={preview} alt={asset.file_name} className="asset-thumb-img" />
+        ) : (
+          <span className="asset-thumb-icon">{typeInfo.icon}</span>
+        )}
+      </div>
+
+      {/* Info */}
+      <div className="asset-info">
+        <div className="asset-name">{asset.file_name}</div>
+        <div className="asset-meta">
+          <span className="asset-type-badge">{typeInfo.icon} {typeInfo.label}</span>
+          <span style={{ color: 'var(--text-3)', fontSize: 11 }}>{fmtSize(asset.file_size_bytes)}</span>
+          <span style={{ color: 'var(--text-3)', fontSize: 11 }}>
+            {format(parseISO(asset.created_at), 'dd MMM yyyy, HH:mm')}
+          </span>
+        </div>
+        {asset.notes && (
+          <div className="asset-notes">{asset.notes}</div>
+        )}
+      </div>
+
+      {/* Actions */}
+      <div className="asset-actions">
+        <button className="btn btn-sm" onClick={onDownload}>⬇ Download</button>
+        <button
+          className="btn btn-sm btn-ghost"
+          onClick={onDelete}
+          style={{ color: 'var(--fail)' }}
+          title="Delete file"
+        >
+          🗑
+        </button>
+      </div>
     </div>
   )
 }
