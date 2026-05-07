@@ -604,3 +604,98 @@ IMPORTANT DRUG-SPECIFIC RULES:
 ${logoSection}
 ${JSON_SCHEMA}`
 }
+
+// ── INTERNAL GUIDELINES EXTRACTOR ────────────────────────────────────────
+/**
+ * Extract a structured summary from an internal guideline document.
+ * Works from pasted text content and/or an image of the document.
+ *
+ * @param {Object}  opts
+ * @param {string}  opts.title       - User-provided title
+ * @param {string}  opts.category    - 'general' | 'brand' | 'regulatory' | 'sop'
+ * @param {string}  opts.track       - 'drug' | 'cosmetic' | 'both'
+ * @param {string|null} opts.content - Pasted text content (may be null)
+ * @param {string|null} opts.base64  - Base64 image data (may be null)
+ * @param {string|null} opts.mimeType - Image MIME type (may be null)
+ *
+ * Returns: { suggested_title, summary, full_content }
+ */
+export async function extractGuidelineSummary({ title, category, track, content, base64, mimeType }) {
+  const trackLabel = { both: 'cosmetic and drug', cosmetic: 'cosmetic', drug: 'drug' }[track] || track
+  const catLabel   = { general: 'general', brand: 'brand standards', regulatory: 'regulatory', sop: 'SOP/procedure' }[category] || category
+
+  const systemPrompt = `You are a packaging compliance expert for Velite Healthcare (India).
+Your task is to extract and structure the key rules from an internal Velite guideline document.
+
+DOCUMENT METADATA:
+- Title provided by user: "${title}"
+- Category: ${catLabel}
+- Applies to: ${trackLabel} products
+
+INSTRUCTIONS:
+1. Read all provided content (text and/or image).
+2. Extract ALL specific rules, requirements, measurements, fonts, colours, spacing, wording — anything actionable.
+3. Return ONLY valid JSON — no markdown, no prose outside the JSON.
+
+Return this exact schema:
+{
+  "suggested_title": "<concise professional title, ≤ 60 chars>",
+  "summary": "<2-4 sentence summary of what this guideline covers and why it matters for label compliance. Max 300 chars.>",
+  "full_content": "<complete structured extraction of all rules and requirements from the document, formatted as plain text with clear sections. This is injected verbatim into AI compliance checks.>"
+}`
+
+  const userContent = []
+
+  if (base64 && mimeType) {
+    userContent.push(
+      { type: 'text', text: 'Here is the guideline document image:' },
+      { type: 'image', source: { type: 'base64', media_type: mimeType, data: base64 } },
+    )
+  }
+
+  if (content && content.trim()) {
+    userContent.push({
+      type: 'text',
+      text: `Here is the document text content:\n\n${content.trim()}`,
+    })
+  }
+
+  if (userContent.length === 0) {
+    // No content at all — generate a placeholder from title + category
+    userContent.push({
+      type: 'text',
+      text: `No document content was provided. Generate a placeholder structure for a ${catLabel} guideline titled "${title}" for ${trackLabel} packaging. Indicate in full_content that the actual rules need to be filled in manually.`,
+    })
+  }
+
+  userContent.push({
+    type: 'text',
+    text: 'Extract the guideline structure now. Return only the JSON.',
+  })
+
+  const response = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': ANTHROPIC_API_KEY,
+      'anthropic-version': '2023-06-01',
+      'anthropic-dangerous-direct-browser-access': 'true',
+    },
+    body: JSON.stringify({
+      model: 'claude-opus-4-5',
+      max_tokens: 2048,
+      system: systemPrompt,
+      messages: [{ role: 'user', content: userContent }],
+    }),
+  })
+
+  if (!response.ok) {
+    const err = await response.text()
+    throw new Error(`Claude API error: ${response.status} — ${err}`)
+  }
+
+  const data    = await response.json()
+  const raw     = data.content?.[0]?.text || ''
+  const cleaned = raw.replace(/^```json\s*/i, '').replace(/```\s*$/i, '').trim()
+  return JSON.parse(cleaned)
+}

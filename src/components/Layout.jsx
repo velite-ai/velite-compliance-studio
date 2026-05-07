@@ -8,6 +8,7 @@ const NAV = [
   { to: '/text-generator', label: 'Text Generator', icon: '✏️' },
   { to: '/export',         label: 'Export Module',  icon: '🌍' },
   { to: '/history',        label: 'History',        icon: '◷' },
+  { to: '/guidelines',     label: 'Guidelines',     icon: '📚' },
   { to: '/style-guide',    label: 'Style Guide',    icon: '◉' },
   { to: '/regulations',    label: 'Regulations',    icon: '📋' },
 ]
@@ -22,6 +23,7 @@ const PAGE_TITLES = {
   '/style-guide':    'Style Guide',
   '/regulations':    'Regulation Library',
   '/export':         'Export Compliance',
+  '/guidelines':     'Internal Guidelines',
 }
 
 export default function Layout() {

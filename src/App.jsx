@@ -13,6 +13,7 @@ import StyleGuide from './pages/StyleGuide'
 import Regulations from './pages/Regulations'
 import TextGenerator from './pages/TextGenerator'
 import ExportCompliance from './pages/ExportCompliance'
+import Guidelines from './pages/Guidelines'
 
 function ProtectedRoute({ children }) {
   const { user, loading } = useAuth()
@@ -47,6 +48,7 @@ export default function App() {
         <Route path="style-guide" element={<StyleGuide />} />
         <Route path="regulations" element={<Regulations />} />
         <Route path="export" element={<ExportCompliance />} />
+        <Route path="guidelines" element={<Guidelines />} />
       </Route>
     </Routes>
   )
