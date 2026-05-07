@@ -3,24 +3,38 @@ import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { supabase } from '../lib/supabase'
 import { analyseLabel } from '../lib/anthropic'
-import { PRODUCT_CATEGORIES, REGULATION_TOGGLES } from '../lib/regulations'
+import {
+  PRODUCT_CATEGORIES,
+  REGULATION_TOGGLES,
+  DRUG_PRODUCT_CATEGORIES,
+  DRUG_REGULATION_TOGGLES,
+  DRUG_REGULATION_DEFAULTS,
+} from '../lib/regulations'
 import ScoreCircle from '../components/ScoreCircle'
 import VerdictBadge from '../components/VerdictBadge'
+import TrackBadge from '../components/TrackBadge'
+
+const COSMETIC_REG_DEFAULTS = { cosmetics: true, weights: true, claims: true, ingredients: true }
 
 export default function NewCheck() {
   const { user } = useAuth()
   const navigate = useNavigate()
   const fileRef = useRef()
 
+  // ── Track ─────────────────────────────────────────────────────────────
+  const [track, setTrack] = useState('cosmetic')
+
+  // ── Form state ────────────────────────────────────────────────────────
   const [file, setFile] = useState(null)
   const [preview, setPreview] = useState(null)
   const [productName, setProductName] = useState('')
   const [category, setCategory] = useState('')
   const [extraContext, setExtraContext] = useState('')
   const [dragOver, setDragOver] = useState(false)
-  const [regs, setRegs] = useState({ cosmetics: true, weights: true, claims: true, ingredients: true })
+  const [regs, setRegs] = useState(COSMETIC_REG_DEFAULTS)
   const [styleRules, setStyleRules] = useState([])
 
+  // ── Async state ───────────────────────────────────────────────────────
   const [analysing, setAnalysing] = useState(false)
   const [saving, setSaving] = useState(false)
   const [result, setResult] = useState(null)
@@ -32,6 +46,18 @@ export default function NewCheck() {
       if (data) setStyleRules(data)
     })
   }, [])
+
+  // Reset category + regs when track changes
+  function switchTrack(newTrack) {
+    setTrack(newTrack)
+    setCategory('')
+    setRegs(newTrack === 'drug' ? DRUG_REGULATION_DEFAULTS : COSMETIC_REG_DEFAULTS)
+    setResult(null)
+    setSavedId(null)
+  }
+
+  const categories = track === 'drug' ? DRUG_PRODUCT_CATEGORIES : PRODUCT_CATEGORIES
+  const regToggles = track === 'drug' ? DRUG_REGULATION_TOGGLES : REGULATION_TOGGLES
 
   function handleFile(f) {
     if (!f) return
@@ -67,6 +93,7 @@ export default function NewCheck() {
         extraContext,
         regulations: regs,
         styleRules,
+        track,
       })
       setResult(res)
     } catch (ex) {
@@ -92,6 +119,7 @@ export default function NewCheck() {
         user_id: user.id,
         product_name: productName,
         product_category: category || null,
+        track,
         verdict: result.verdict,
         score: result.score,
         summary: result.summary,
@@ -138,15 +166,55 @@ export default function NewCheck() {
     }
   }
 
-  const failItems    = result?.items?.filter(i => i.status === 'FAIL')    || []
-  const warnItems    = result?.items?.filter(i => i.status === 'WARNING') || []
-  const passItems    = result?.items?.filter(i => i.status === 'PASS')    || []
+  const failItems = result?.items?.filter(i => i.status === 'FAIL')    || []
+  const warnItems = result?.items?.filter(i => i.status === 'WARNING') || []
+  const passItems = result?.items?.filter(i => i.status === 'PASS')    || []
+
+  const isDrug = track === 'drug'
 
   return (
     <div>
+
+      {/* ── TRACK SELECTOR — most prominent UI element ── */}
+      <div
+        className="track-selector-card"
+        style={{
+          background: isDrug ? 'var(--drug-bg)' : 'var(--cosmetic-bg)',
+          borderColor: isDrug ? 'var(--drug-border)' : 'var(--cosmetic-border)',
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
+          <div>
+            <div className="track-selector-label">Regulatory Track</div>
+            <div style={{ fontSize: 12, color: 'var(--text-3)', marginTop: 2 }}>
+              {isDrug
+                ? 'Checking against Drugs & Cosmetics Rules 1945 (Drug labelling requirements)'
+                : 'Checking against Cosmetics Rules 2020 (Cosmetic label declarations)'}
+            </div>
+          </div>
+          <div className="track-toggle">
+            <button
+              className={`track-btn cosmetic${!isDrug ? ' active' : ''}`}
+              onClick={() => switchTrack('cosmetic')}
+            >
+              🧴 Cosmetic
+            </button>
+            <button
+              className={`track-btn drug${isDrug ? ' active' : ''}`}
+              onClick={() => switchTrack('drug')}
+            >
+              💊 Drug / OTC
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* ── MAIN 2-COL GRID ── */}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20, alignItems: 'start' }}>
+
         {/* LEFT: Inputs */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+
           {/* Upload */}
           <div className="card">
             <div className="card-header"><span className="card-title">Label / Artwork</span></div>
@@ -161,7 +229,7 @@ export default function NewCheck() {
                 >
                   <div className="upload-icon">🖼️</div>
                   <h3>Drop label image here</h3>
-                  <p>or click to browse · JPG, PNG, WEBP, PDF</p>
+                  <p>or click to browse · JPG, PNG, WEBP</p>
                   <input
                     ref={fileRef} type="file" hidden
                     accept="image/*"
@@ -186,29 +254,36 @@ export default function NewCheck() {
 
           {/* Product details */}
           <div className="card">
-            <div className="card-header"><span className="card-title">Product Details</span></div>
+            <div className="card-header">
+              <span className="card-title">Product Details</span>
+              <TrackBadge track={track} />
+            </div>
             <div className="card-body">
               <div className="form-group">
                 <label className="form-label">Product Name *</label>
                 <input
                   className="form-input"
-                  placeholder="e.g. Velite ClearSkin Sunscreen SPF 50"
+                  placeholder={isDrug
+                    ? 'e.g. Velite Paracetamol Tablets IP 500 mg'
+                    : 'e.g. Velite ClearSkin Sunscreen SPF 50'}
                   value={productName}
                   onChange={e => setProductName(e.target.value)}
                 />
               </div>
               <div className="form-group">
-                <label className="form-label">Product Category</label>
+                <label className="form-label">{isDrug ? 'Dosage Form / Category' : 'Product Category'}</label>
                 <select className="form-select" value={category} onChange={e => setCategory(e.target.value)}>
-                  <option value="">— Select category —</option>
-                  {PRODUCT_CATEGORIES.map(c => <option key={c}>{c}</option>)}
+                  <option value="">— Select —</option>
+                  {categories.map(c => <option key={c}>{c}</option>)}
                 </select>
               </div>
               <div className="form-group" style={{ marginBottom: 0 }}>
                 <label className="form-label">Notes / Context</label>
                 <textarea
                   className="form-textarea"
-                  placeholder="Any specific Velite conventions, house style preferences, or brand standards the AI should enforce."
+                  placeholder={isDrug
+                    ? 'e.g., This is a Schedule H drug. Verify Schedule H warning text and Rx symbol placement.'
+                    : 'Any specific Velite conventions, house style preferences, or brand standards the AI should enforce.'}
                   value={extraContext}
                   onChange={e => setExtraContext(e.target.value)}
                   rows={3}
@@ -224,7 +299,7 @@ export default function NewCheck() {
             </div>
             <div className="card-body">
               <div className="toggle-group">
-                {REGULATION_TOGGLES.map(({ key, label, sub, icon }) => (
+                {regToggles.map(({ key, label, sub, icon }) => (
                   <div
                     key={key}
                     className={`toggle-row${regs[key] ? ' active' : ''}`}
@@ -253,13 +328,17 @@ export default function NewCheck() {
 
           <button
             className="btn btn-primary btn-lg"
-            style={{ justifyContent: 'center' }}
+            style={{
+              justifyContent: 'center',
+              background: isDrug ? 'var(--drug)' : undefined,
+              borderColor: isDrug ? 'var(--drug)' : undefined,
+            }}
             onClick={runCheck}
             disabled={analysing || !file}
           >
             {analysing
               ? <><span className="spinner" /> Analysing label…</>
-              : '⚡ Run Compliance Check'}
+              : `⚡ Run ${isDrug ? 'Drug' : 'Cosmetic'} Compliance Check`}
           </button>
         </div>
 
@@ -268,9 +347,9 @@ export default function NewCheck() {
           {!result && !analysing && (
             <div className="card">
               <div className="empty-state" style={{ padding: '48px 24px' }}>
-                <div className="empty-icon">🔍</div>
+                <div className="empty-icon">{isDrug ? '💊' : '🔍'}</div>
                 <h3>No report yet</h3>
-                <p>Upload a label and click Run to analyse it against Indian cosmetic packaging regulations.</p>
+                <p>Upload a {isDrug ? 'drug' : 'cosmetic'} label and click Run to analyse it against Indian {isDrug ? 'drug (D&C Rules 1945)' : 'cosmetic (Cosmetics Rules 2020)'} packaging regulations.</p>
               </div>
             </div>
           )}
@@ -280,7 +359,7 @@ export default function NewCheck() {
               <div className="loading-page" style={{ flexDirection: 'column', padding: '48px 24px' }}>
                 <span className="spinner" style={{ width: 32, height: 32, borderWidth: 3 }} />
                 <p style={{ marginTop: 12, fontSize: 13, color: 'var(--text-2)', textAlign: 'center' }}>
-                  Claude is reviewing your label against Indian cosmetics regulations…<br />
+                  Claude is reviewing your {isDrug ? 'drug' : 'cosmetic'} label against Indian {isDrug ? 'D&C Rules 1945' : 'Cosmetics Rules 2020'}…<br />
                   <span style={{ color: 'var(--text-3)', fontSize: 11 }}>This usually takes 10–20 seconds</span>
                 </p>
               </div>
@@ -294,10 +373,11 @@ export default function NewCheck() {
                 <ScoreCircle score={result.score || 0} size={96} />
                 <div className="result-meta">
                   <div className="result-product">{productName}</div>
-                  <div style={{ marginTop: 6 }}>
+                  <div style={{ marginTop: 6, display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
                     <VerdictBadge verdict={result.verdict} size="lg" />
+                    <TrackBadge track={track} size="sm" />
                     {category && (
-                      <span className="badge badge-gray" style={{ marginLeft: 6 }}>{category}</span>
+                      <span className="badge badge-gray">{category}</span>
                     )}
                   </div>
                   <div className="result-summary">{result.summary}</div>

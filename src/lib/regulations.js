@@ -1,3 +1,4 @@
+// ── COSMETIC ──────────────────────────────────────────────────────────────
 export const PRODUCT_CATEGORIES = [
   'Sunscreen / Sun care',
   'Anti-acne',
@@ -16,6 +17,70 @@ export const PRODUCT_CATEGORIES = [
   'Other',
 ]
 
+// ── DRUG ──────────────────────────────────────────────────────────────────
+export const DRUG_PRODUCT_CATEGORIES = [
+  'Tablet / Capsule',
+  'Syrup / Suspension / Elixir',
+  'Topical Cream / Ointment',
+  'Topical Gel / Lotion',
+  'Eye / Ear / Nasal Drops',
+  'Nasal Spray / Inhalation',
+  'Injection / IV / Ampoule',
+  'Dry Powder Inhaler (DPI)',
+  'Patch / Transdermal',
+  'Suppository / Pessary',
+  'OTC Antacid / Digestive Aid',
+  'Vitamins / Minerals / Supplements',
+  'Herbal / Ayurvedic / Unani',
+  'Dental / Oral Rinse',
+  'Surgical Dressing / Antiseptic',
+  'Diagnostic / Reagent Kit',
+  'Other Drug',
+]
+
+export const DRUG_SCHEDULE_TYPES = [
+  'Schedule H',
+  'Schedule H1',
+  'Schedule X',
+  'Schedule G',
+  'OTC (No Schedule)',
+]
+
+export const DRUG_REGULATION_TOGGLES = [
+  {
+    key: 'drug_act',
+    label: 'D&C Rules 1945 — Rule 96',
+    sub: 'All mandatory drug label declarations',
+    icon: '💊',
+  },
+  {
+    key: 'schedule',
+    label: 'Schedule Declaration',
+    sub: 'Schedule H / H1 / X / G warnings & Rx symbol',
+    icon: '📋',
+  },
+  {
+    key: 'weights',
+    label: 'Legal Metrology 2011',
+    sub: 'Net qty, font size, MRP format',
+    icon: '⚖️',
+  },
+  {
+    key: 'composition',
+    label: 'Composition Disclosure',
+    sub: 'Active ingredients, strength & excipients listing',
+    icon: '🧪',
+  },
+]
+
+export const DRUG_REGULATION_DEFAULTS = {
+  drug_act: true,
+  schedule: true,
+  weights: true,
+  composition: true,
+}
+
+// ── COSMETIC ──────────────────────────────────────────────────────────────
 export const REGULATION_TOGGLES = [
   {
     key: 'cosmetics',
@@ -168,6 +233,60 @@ export const REGULATION_LIBRARY = [
   },
 ]
 
+// ── DRUG REGULATION LIBRARY ───────────────────────────────────────────────
+export const DRUG_REGULATION_LIBRARY = [
+  {
+    id: 'dc-rules-rule96',
+    title: 'Drugs & Cosmetics Rules 1945 — Rule 96',
+    authority: 'CDSCO / Ministry of Health & Family Welfare',
+    summary:
+      'Governs mandatory label information for all drugs manufactured, imported, or sold in India. Every pack must carry all Rule 96 declarations.',
+    mandatoryFields: [
+      { field: 'Drug Name', requirement: 'Brand name + generic (INN) name on principal display panel' },
+      { field: 'Rx / OTC Status', requirement: '"Rx" symbol for prescription drugs; "For retail without prescription" for OTC' },
+      { field: 'Schedule Declaration', requirement: 'Schedule H: "To be sold by retail on prescription of a RMP only"; H1: additional WARNING text; X: Schedule X declaration' },
+      { field: 'Composition', requirement: 'Each active ingredient with quantity per dosage unit (e.g., "Paracetamol IP 500 mg"); excipients where relevant' },
+      { field: 'Net Contents', requirement: 'Number of tablets/capsules, volume in ml, weight in g; per strip and per box' },
+      { field: 'Drugs Licence Number', requirement: 'DLN of manufacturer (e.g., "Mfg. Lic. No. MH/…")' },
+      { field: 'Manufacturer Name & Address', requirement: 'Full name and complete address including PIN code of manufacturer' },
+      { field: 'Batch / Lot Number', requirement: 'Batch No. / Lot No. for traceability' },
+      { field: 'Date of Manufacture', requirement: 'Mfg. Date: MM/YYYY format' },
+      { field: 'Expiry Date', requirement: 'Exp. Date / Use before: MM/YYYY — must be expiry, not "best before"' },
+      { field: 'MRP', requirement: '"MRP ₹XX.XX (Incl. of all taxes)" — Legal Metrology format' },
+      { field: 'Storage Conditions', requirement: 'e.g., "Store below 25°C, in a cool dry place, protect from light"' },
+      { field: 'Keep out of reach', requirement: '"Keep out of reach of children" — mandatory on all drug labels' },
+      { field: 'Instructions for Use', requirement: 'Dosage/directions where applicable' },
+    ],
+    reference: 'https://cdsco.gov.in/opencms/export/sites/CDSCO_WEB/Pdf-documents/forms/form-27c.pdf',
+  },
+  {
+    id: 'schedule-h',
+    title: 'Schedule H — Prescription Drug Declaration',
+    authority: 'CDSCO / Drugs & Cosmetics Rules 1945',
+    summary:
+      'Schedule H drugs require a prescription. The label must carry the specific Schedule H warning text and the Rx symbol.',
+    mandatoryFields: [
+      { field: 'Schedule H Text', requirement: '"Schedule H Drug — To be sold by retail on the prescription of a Registered Medical Practitioner only"' },
+      { field: 'Rx Symbol', requirement: 'Rx symbol in a box on the principal display panel' },
+    ],
+    reference: 'https://cdsco.gov.in/opencms/export/sites/CDSCO_WEB/Pdf-documents/drugs/Schedule%20H.pdf',
+  },
+  {
+    id: 'schedule-h1',
+    title: 'Schedule H1 — Controlled Prescription Drug',
+    authority: 'CDSCO / Drugs & Cosmetics Rules 1945',
+    summary:
+      'Schedule H1 drugs (antibiotics, anti-TB, psychotropics) have stricter labelling. The WARNING text is mandatory.',
+    mandatoryFields: [
+      { field: 'WARNING Text', requirement: '"WARNING: It is dangerous to take this preparation except under medical supervision"' },
+      { field: 'Schedule H1 Declaration', requirement: '"Schedule H1 Drug" on the label' },
+      { field: 'Rx Symbol', requirement: 'Rx symbol with Schedule H1 designation' },
+    ],
+    reference: 'https://cdsco.gov.in/opencms/export/sites/CDSCO_WEB/Pdf-documents/drugs/ScheduleH1.pdf',
+  },
+]
+
+// ── COSMETIC REGULATION LIBRARY ───────────────────────────────────────────
 // Common restricted / banned cosmetic ingredients in India
 export const INGREDIENT_FLAGS = [
   { name: 'Mercury compounds', status: 'banned', reason: 'Banned under Cosmetics Rules 2020' },
