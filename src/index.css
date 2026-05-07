@@ -1111,6 +1111,113 @@ tr:hover td { background: var(--surface-2); }
 }
 
 /* ══════════════════════════════════════════════
+   MODULE 3C — ANNOTATION LAYER
+   ══════════════════════════════════════════════ */
+
+/* Image canvas — the click target */
+.annotation-canvas {
+  position: relative;
+  border: 2px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  cursor: default;
+  line-height: 0;          /* remove inline gap under img */
+  transition: border-color .15s;
+}
+
+.annotation-canvas.selecting {
+  border-color: var(--accent);
+  cursor: crosshair;
+}
+
+/* Numbered marker circle */
+.annotation-marker {
+  position: absolute;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 800;
+  color: #fff;
+  transform: translate(-50%, -50%);
+  cursor: pointer;
+  border: 2.5px solid #fff;
+  box-shadow: 0 2px 6px rgba(0,0,0,.4);
+  transition: transform .12s, box-shadow .12s;
+  z-index: 10;
+  pointer-events: all;
+  user-select: none;
+}
+
+.annotation-marker:hover {
+  transform: translate(-50%, -50%) scale(1.18);
+  box-shadow: 0 3px 10px rgba(0,0,0,.45);
+}
+
+.annotation-marker.FAIL    { background: var(--fail); }
+.annotation-marker.WARNING { background: var(--warn); }
+
+.annotation-marker.selected {
+  box-shadow: 0 0 0 3px #fff, 0 0 0 5px var(--accent), 0 4px 12px rgba(0,0,0,.3);
+  transform: translate(-50%, -50%) scale(1.12);
+}
+
+/* Issue selector list */
+.annotate-issue-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.annotate-issue-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 9px 10px;
+  border-radius: 8px;
+  border: 1.5px solid var(--border);
+  cursor: pointer;
+  transition: all .15s;
+  background: var(--surface);
+}
+
+.annotate-issue-row:hover         { border-color: var(--accent); }
+.annotate-issue-row.selected      { border-color: var(--accent); background: var(--accent-light); }
+.annotate-issue-row.placed        { opacity: .75; }
+.annotate-issue-row.selected.placed { opacity: 1; }
+
+/* Numbered badge used in both annotate panel and issue cards */
+.annotate-num {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  font-weight: 800;
+  color: #fff;
+  flex-shrink: 0;
+}
+
+/* Instructions banner */
+.annotate-instructions {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  background: var(--accent-light);
+  border: 1px solid var(--accent-muted);
+  border-radius: 8px;
+  padding: 10px 14px;
+  font-size: 12px;
+  color: var(--text-2);
+  line-height: 1.5;
+}
+
+/* ══════════════════════════════════════════════
    MODULE 3B — TEXT GENERATOR
    ══════════════════════════════════════════════ */
 
