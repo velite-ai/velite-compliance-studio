@@ -1110,6 +1110,49 @@ tr:hover td { background: var(--surface-2); }
   margin-bottom: 2px;
 }
 
+/* ══════════════════════════════════════════════
+   MODULE 3B — TEXT GENERATOR
+   ══════════════════════════════════════════════ */
+
+/* Generated section card */
+.tg-section {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+  transition: box-shadow .15s;
+}
+
+.tg-section:hover { box-shadow: var(--shadow-md); }
+
+.tg-section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  background: var(--surface-2);
+  border-bottom: 1px solid var(--border);
+  gap: 10px;
+}
+
+.tg-section-title {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+
+.tg-section-body {
+  padding: 14px 16px;
+  font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+  font-size: 12px;
+  line-height: 1.9;
+  color: var(--text);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 /* Nav section label */
 .nav-section {
   font-size: 9px;

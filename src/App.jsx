@@ -11,6 +11,7 @@ import History from './pages/History'
 import CheckDetail from './pages/CheckDetail'
 import StyleGuide from './pages/StyleGuide'
 import Regulations from './pages/Regulations'
+import TextGenerator from './pages/TextGenerator'
 
 function ProtectedRoute({ children }) {
   const { user, loading } = useAuth()
@@ -39,6 +40,7 @@ export default function App() {
         <Route path="projects/new" element={<NewProject />} />
         <Route path="projects/:id" element={<ProjectDetail />} />
         <Route path="new-check" element={<NewCheck />} />
+        <Route path="text-generator" element={<TextGenerator />} />
         <Route path="history" element={<History />} />
         <Route path="checks/:id" element={<CheckDetail />} />
         <Route path="style-guide" element={<StyleGuide />} />

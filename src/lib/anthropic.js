@@ -87,7 +87,159 @@ export async function analyseLabel({
   return JSON.parse(cleaned)
 }
 
-// ── JSON SCHEMA (shared) ─────────────────────────────────────────────────
+// ── TEXT GENERATOR ──────────────────────────────────────────────────────
+/**
+ * Generate complete regulation-compliant label text from product details.
+ * Returns { sections: [{ id, title, content }], regulatory_notes: [] }
+ *
+ * @param {Object} opts
+ * @param {string} opts.track       - 'cosmetic' | 'drug'
+ * @param {Object} opts.details     - All form fields
+ */
+export async function generateLabelText({ track, details }) {
+  const isDrug = track === 'drug'
+
+  const systemPrompt = isDrug ? buildDrugGeneratorPrompt(details) : buildCosmeticGeneratorPrompt(details)
+
+  const response = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': ANTHROPIC_API_KEY,
+      'anthropic-version': '2023-06-01',
+      'anthropic-dangerous-direct-browser-access': 'true',
+    },
+    body: JSON.stringify({
+      model: 'claude-opus-4-5',
+      max_tokens: 4096,
+      system: systemPrompt,
+      messages: [{ role: 'user', content: 'Generate the complete label text now. Return only the JSON.' }],
+    }),
+  })
+
+  if (!response.ok) {
+    const err = await response.text()
+    throw new Error(`Claude API error: ${response.status} — ${err}`)
+  }
+
+  const data = await response.json()
+  const raw  = data.content?.[0]?.text || ''
+  const cleaned = raw.replace(/^```json\s*/i, '').replace(/```\s*$/i, '').trim()
+  return JSON.parse(cleaned)
+}
+
+const GENERATOR_SCHEMA = `
+Return ONLY valid JSON — no prose, no markdown — matching this exact schema:
+{
+  "sections": [
+    {
+      "id": "<snake_case_id>",
+      "title": "<display title>",
+      "content": "<the exact label text for this section, ready to paste onto the label>"
+    }
+  ],
+  "regulatory_notes": [
+    "<important note or reminder for the packaging designer>"
+  ]
+}`
+
+function buildCosmeticGeneratorPrompt(d) {
+  return `You are a regulatory packaging expert specialising in Indian cosmetics labelling (Cosmetics Rules 2020 + Legal Metrology 2011).
+Generate complete, print-ready label text for the product below. Every mandatory declaration must be present and correctly formatted.
+
+PRODUCT DETAILS:
+Product Name: ${d.productName || '(not provided)'}
+${d.tagline ? `Tagline: ${d.tagline}` : ''}
+Category: ${d.category || '(not provided)'}
+${d.claims ? `Key Claims / Benefits:\n${d.claims}` : ''}
+Ingredients (INCI): ${d.ingredients || '(not provided)'}
+Net Content: ${d.netContent || '(not provided)'}
+Manufacturer Name: ${d.manufacturerName || '(not provided)'}
+Manufacturer Address: ${d.manufacturerAddress || '(not provided)'}
+City / State / PIN: ${d.cityStatePIN || '(not provided)'}
+CML Number: ${d.licenceNumber || '(leave placeholder [CML No.])'}
+Country of Origin: ${d.countryOfOrigin || 'India'}
+Consumer Helpline: ${d.helpline || '(leave placeholder)'}
+MRP: ${d.mrp ? `₹${d.mrp}` : '(leave placeholder)'}
+Usage Instructions: ${d.usageInstructions || ''}
+Special Warnings: ${d.warnings || ''}
+
+Generate these sections (include ALL, even if some fields are placeholders):
+1. product_name — brand name + any variant/descriptor
+2. tagline — if applicable
+3. net_content — formatted: "Net Content: XX g" (Legal Metrology compliant)
+4. ingredients — "Ingredients: [INCI list in descending order of concentration]"
+5. claims — key claims/benefits in cosmetic-safe language (no therapeutic claims)
+6. manufacturer — full "Manufactured by:" block with name, address, city, state, PIN, country
+7. cml_number — "CML No.: [number]"
+8. batch_info — template with blanks: "Batch No.: ___  |  Mfg. Date: MM/YYYY  |  Use Before: MM/YYYY"
+9. mrp — "MRP ₹___ (Incl. of all taxes)" format
+10. consumer_helpline — "Consumer Complaints: [contact]"
+11. warnings — all applicable warnings (e.g., "For external use only. Keep out of reach of children. Avoid contact with eyes.")
+12. usage_instructions — "How to use:" block
+
+RULES:
+- Use only cosmetic-safe claim language — no drug/therapeutic claims
+- INCI names must be in descending concentration order
+- Ingredients must say "Ingredients:" not "Formula:"
+- MRP must follow Legal Metrology format exactly
+- Use [PLACEHOLDER] style for missing values
+${GENERATOR_SCHEMA}`
+}
+
+function buildDrugGeneratorPrompt(d) {
+  const scheduleText = {
+    'Schedule H':  'Schedule H Drug — To be sold by retail on the prescription of a Registered Medical Practitioner only.',
+    'Schedule H1': 'Schedule H1 Drug\nWARNING: It is dangerous to take this preparation except under medical supervision.\nTo be sold by retail on the prescription of a Registered Medical Practitioner only.',
+    'Schedule X':  'Schedule X Drug — To be sold by retail on the prescription of a Registered Medical Practitioner only.\n[Controlled Substance — maintain records as per Drugs & Cosmetics Rules]',
+    'Schedule G':  'Caution: It is dangerous to take this preparation except under medical supervision.',
+    'OTC (No Schedule)': '',
+  }[d.schedule] || ''
+
+  return `You are a regulatory packaging expert specialising in Indian drug labelling under Drugs & Cosmetics Act 1940 and Drugs & Cosmetics Rules 1945 (Rule 96).
+Generate complete, print-ready drug label text for the product below. Every mandatory Rule 96 declaration must be present and correctly formatted.
+
+PRODUCT DETAILS:
+Brand Name: ${d.productName || '(not provided)'}
+Active Ingredients (INN + strength): ${d.activeIngredients || '(not provided)'}
+Excipients: ${d.excipients || '(not listed — write "q.s." or leave for designer)'}
+Dosage Form / Category: ${d.category || '(not provided)'}
+Schedule: ${d.schedule || 'OTC (No Schedule)'}
+Net Contents: ${d.netContent || '(not provided)'}
+Manufacturer Name: ${d.manufacturerName || '(not provided)'}
+Manufacturer Address: ${d.manufacturerAddress || '(not provided)'}
+City / State / PIN: ${d.cityStatePIN || '(not provided)'}
+Drugs Licence Number: ${d.licenceNumber || '(leave placeholder [DLN])'}
+Country of Origin: ${d.countryOfOrigin || 'India'}
+MRP: ${d.mrp ? `₹${d.mrp}` : '(leave placeholder)'}
+Storage Conditions: ${d.storageConditions || 'Store below 25°C in a cool, dry place. Protect from light and moisture.'}
+Dosage / Directions for Use: ${d.dosageDirections || ''}
+Special Warnings: ${d.warnings || ''}
+
+${scheduleText ? `SCHEDULE DECLARATION (use this verbatim):\n${scheduleText}` : ''}
+
+Generate these sections (ALL mandatory — use [PLACEHOLDER] for missing values):
+1. product_name — brand name prominently + generic INN name below
+2. composition — "Each [tablet/capsule/5 ml] contains:" with active ingredients + INN + strength; excipients
+3. net_contents — e.g., "10 Tablets" or "60 ml" with per-strip / per-pack breakdown
+4. schedule_declaration — full schedule text verbatim (if applicable); Rx symbol instruction
+5. manufacturer_dln — "Manufactured by: [Name]\\n[Address]\\nMfg. Lic. No.: [DLN]"
+6. batch_info — "Batch No.: ___ | Mfg. Date: MM/YYYY | Exp. Date: MM/YYYY" (NOTE: must say "Exp. Date", NOT "Best Before")
+7. mrp — "MRP ₹___ (Incl. of all taxes)"
+8. storage — complete storage conditions text
+9. keep_out_of_reach — "Keep out of reach of children."
+10. dosage_directions — directions for use / dosage regimen
+11. warnings — all applicable warnings
+
+RULES:
+- Expiry field must say "Exp. Date" or "Use before" — NEVER "Best Before" (that is cosmetics terminology)
+- Active ingredient names must be INN / Pharmacopoeial (IP/BP/USP), not brand/trade names
+- Schedule declaration text must be used verbatim — paraphrasing is non-compliant
+- DLN is mandatory — absence is a regulatory failure
+${GENERATOR_SCHEMA}`
+}
+
+// ── JSON SCHEMA (shared for compliance checker) ────────────────────────
 const JSON_SCHEMA = `
 Return ONLY valid JSON matching this exact schema:
 {

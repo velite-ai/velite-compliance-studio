@@ -4,8 +4,9 @@ import { useAuth } from '../context/AuthContext'
 const NAV = [
   { to: '/',           label: 'Dashboard',    icon: '◈',  end: true },
   { to: '/projects',   label: 'Projects',     icon: '📁' },
-  { to: '/new-check',  label: 'New Check',    icon: '＋' },
-  { to: '/history',    label: 'History',      icon: '◷' },
+  { to: '/new-check',      label: 'New Check',      icon: '＋' },
+  { to: '/text-generator', label: 'Text Generator', icon: '✏️' },
+  { to: '/history',        label: 'History',        icon: '◷' },
   { to: '/style-guide',label: 'Style Guide',  icon: '◉' },
   { to: '/regulations',label: 'Regulations',  icon: '📋' },
 ]
@@ -14,8 +15,9 @@ const PAGE_TITLES = {
   '/':               'Dashboard',
   '/projects':       'Projects',
   '/projects/new':   'New Project',
-  '/new-check':      'New Compliance Check',
-  '/history':        'Check History',
+  '/new-check':       'New Compliance Check',
+  '/text-generator':  'Label Text Generator',
+  '/history':         'Check History',
   '/style-guide':    'Style Guide',
   '/regulations':    'Regulation Library',
 }
