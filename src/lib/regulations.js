@@ -80,6 +80,110 @@ export const DRUG_REGULATION_DEFAULTS = {
   composition: true,
 }
 
+// ── LOGO & MARK CHECKS ────────────────────────────────────────────────────
+// These control visual detection prompts sent to Claude.
+// Each check asks Claude to visually look for a specific symbol/mark on the label image.
+
+export const COSMETIC_LOGO_TOGGLES = [
+  {
+    key: 'green_dot',
+    label: 'Green Dot (Vegetarian)',
+    sub: 'Filled green circle inside green square — vegetarian mark',
+    icon: '🟢',
+    prompt: 'Green dot mark (vegetarian indicator): Look for a filled green circle inside a green square on the label. This is required for vegetarian cosmetic/personal care products. Report PASS if present and clearly legible, FAIL if absent on a product marketed as vegetarian, WARNING if present but unclear/too small.',
+  },
+  {
+    key: 'brown_dot',
+    label: 'Brown Dot (Non-Vegetarian)',
+    sub: 'Filled brown/dark circle inside brown square',
+    icon: '🟤',
+    prompt: 'Brown dot mark (non-vegetarian indicator): Look for a filled brown/dark circle inside a brown square. Required for non-vegetarian products (those containing animal-derived ingredients). Report PASS if present when applicable, WARNING if absent and product may contain animal derivatives.',
+  },
+  {
+    key: 'recycling',
+    label: 'Recycling / Plastic Code',
+    sub: 'Möbius loop + resin code (1–7) — Plastic Waste Management Rules',
+    icon: '♻️',
+    prompt: 'Recycling symbol and plastic resin identification code: Look for the triangular Möbius loop (chasing arrows recycling symbol) with a number (1–7) inside or below it indicating the plastic type (e.g. 1=PET, 2=HDPE, 5=PP). Required under Plastic Waste Management Rules 2016 for all plastic packaging. Report PASS if present and legible, FAIL if absent on plastic packaging, WARNING if symbol is present but resin code is missing or unclear.',
+  },
+  {
+    key: 'cruelty_free',
+    label: 'Cruelty-Free Mark',
+    sub: 'PETA / Leaping Bunny logo if claiming cruelty-free',
+    icon: '🐰',
+    prompt: 'Cruelty-free certification mark: Look for a "PETA Cruelty Free" bunny logo, "Leaping Bunny" (CCIC) logo, or similar cruelty-free certification mark. If the label claims "not tested on animals", "cruelty-free", or similar, check if an appropriate certification logo is present. Report PASS if claim and logo are consistent, WARNING if claim is present but no recognisable certification logo, PASS (neutral) if no such claim is made.',
+  },
+  {
+    key: 'organic_cert',
+    label: 'Organic / Natural Certification',
+    sub: 'COSMOS, ECOCERT, USDA Organic, Natrue — if making natural claims',
+    icon: '🌿',
+    prompt: 'Organic/natural certification mark: Look for COSMOS Organic, ECOCERT, USDA Organic, Natrue, or similar certification logos. If the label makes "organic", "natural", "bio", or "certified" claims, verify a recognised certification mark is present and identifiable. Report PASS if claim and certification logo align, WARNING if claim is made without a visible certification mark, PASS (neutral) if no natural/organic claims are made.',
+  },
+  {
+    key: 'derma_tested',
+    label: 'Dermatologist Tested Claim',
+    sub: 'If claiming dermatologically tested — verify claim is substantiated',
+    icon: '🔬',
+    prompt: 'Dermatologist tested / clinically tested claim: Look for text or logos claiming "Dermatologist Tested", "Clinically Tested", "Hypoallergenic tested by dermatologists", or similar. Report WARNING if such a claim appears without any qualifying text (e.g., % of dermatologists, study size) or certification mark, PASS if the claim is qualified or no such claim is made.',
+  },
+]
+
+export const COSMETIC_LOGO_DEFAULTS = {
+  green_dot:    true,
+  brown_dot:    false,
+  recycling:    true,
+  cruelty_free: false,
+  organic_cert: false,
+  derma_tested: false,
+}
+
+export const DRUG_LOGO_TOGGLES = [
+  {
+    key: 'rx_symbol',
+    label: 'Rx Symbol',
+    sub: 'Required in a box on all Schedule H / H1 / X drug labels',
+    icon: '℞',
+    prompt: 'Rx symbol: Look for the "Rx" or "℞" symbol, typically displayed prominently in a box or bordered element on the principal display panel. This is mandatory on all Schedule H, H1, and X prescription drug labels. Report PASS if clearly visible and boxed, FAIL if absent on a prescription drug label, WARNING if present but not boxed or difficult to read.',
+  },
+  {
+    key: 'red_stripe',
+    label: 'Red Band / Red Stripe',
+    sub: 'Horizontal red stripe on Schedule H outer carton packaging',
+    icon: '🔴',
+    prompt: 'Red band / red stripe: Look for a horizontal red stripe or band across the label or carton, typically printed at the top or bottom. Under D&C Rules, Schedule H drug outer cartons should carry a red band. Report PASS if present and clearly red, WARNING if present but faint/unclear colour, FAIL if absent on Schedule H outer packaging.',
+  },
+  {
+    key: 'ayush_mark',
+    label: 'Ayush Mark',
+    sub: 'Government AYUSH certification mark for Ayurvedic / Unani / Siddha products',
+    icon: '🌿',
+    prompt: 'Ayush mark: Look for the official AYUSH Department certification mark/logo (the stylised Ayush government emblem). Required for products registered under the Ministry of Ayush (Ayurvedic, Unani, Siddha, Homeopathy). Report PASS if present and legible, FAIL if absent on a product claiming Ayurvedic/Herbal/Unani origin, PASS (neutral) if product is allopathic.',
+  },
+  {
+    key: 'gmp_mark',
+    label: 'GMP / WHO-GMP Mark',
+    sub: 'WHO-GMP or Schedule M compliance mark if claimed',
+    icon: '🏭',
+    prompt: 'GMP certification mark: Look for a WHO-GMP, Schedule M GMP, or other Good Manufacturing Practice certification logo/text. If the label claims GMP certification, verify a recognisable mark is present. Report WARNING if GMP is claimed without a visible certification mark, PASS if a mark is present or no GMP claim is made.',
+  },
+  {
+    key: 'recycling',
+    label: 'Recycling / Plastic Code',
+    sub: 'Möbius loop + resin code (1–7) — Plastic Waste Management Rules',
+    icon: '♻️',
+    prompt: 'Recycling symbol and plastic resin identification code: Look for the triangular Möbius loop with a resin code number (1–7) inside or below it on any plastic blister, strip, or outer carton. Required under Plastic Waste Management Rules 2016. Report PASS if present and legible, FAIL if absent on plastic packaging, WARNING if symbol present but resin code missing.',
+  },
+]
+
+export const DRUG_LOGO_DEFAULTS = {
+  rx_symbol:  true,
+  red_stripe: true,
+  ayush_mark: false,
+  gmp_mark:   false,
+  recycling:  true,
+}
+
 // ── COSMETIC ──────────────────────────────────────────────────────────────
 export const REGULATION_TOGGLES = [
   {

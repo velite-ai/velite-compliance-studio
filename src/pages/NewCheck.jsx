@@ -9,6 +9,10 @@ import {
   DRUG_PRODUCT_CATEGORIES,
   DRUG_REGULATION_TOGGLES,
   DRUG_REGULATION_DEFAULTS,
+  COSMETIC_LOGO_TOGGLES,
+  COSMETIC_LOGO_DEFAULTS,
+  DRUG_LOGO_TOGGLES,
+  DRUG_LOGO_DEFAULTS,
 } from '../lib/regulations'
 import ScoreCircle from '../components/ScoreCircle'
 import VerdictBadge from '../components/VerdictBadge'
@@ -38,6 +42,7 @@ export default function NewCheck() {
   const [category,     setCategory]     = useState('')
   const [extraContext, setExtraContext] = useState('')
   const [regs,         setRegs]         = useState(COSMETIC_REG_DEFAULTS)
+  const [logoChecks,   setLogoChecks]   = useState(COSMETIC_LOGO_DEFAULTS)
   const [styleRules,   setStyleRules]   = useState([])
 
   // ── Async state ───────────────────────────────────────────────────────
@@ -58,13 +63,16 @@ export default function NewCheck() {
     setTrack(newTrack)
     setCategory('')
     setRegs(newTrack === 'drug' ? DRUG_REGULATION_DEFAULTS : COSMETIC_REG_DEFAULTS)
+    setLogoChecks(newTrack === 'drug' ? DRUG_LOGO_DEFAULTS : COSMETIC_LOGO_DEFAULTS)
     setResult(null)
     setSavedId(null)
   }
 
-  const categories = track === 'drug' ? DRUG_PRODUCT_CATEGORIES : PRODUCT_CATEGORIES
-  const regToggles = track === 'drug' ? DRUG_REGULATION_TOGGLES : REGULATION_TOGGLES
-  const isDrug     = track === 'drug'
+  const categories    = track === 'drug' ? DRUG_PRODUCT_CATEGORIES : PRODUCT_CATEGORIES
+  const regToggles    = track === 'drug' ? DRUG_REGULATION_TOGGLES : REGULATION_TOGGLES
+  const logoToggles   = track === 'drug' ? DRUG_LOGO_TOGGLES : COSMETIC_LOGO_TOGGLES
+  const isDrug        = track === 'drug'
+  const activeLogoCount = Object.values(logoChecks).filter(Boolean).length
 
   // ── File helpers ──────────────────────────────────────────────────────
   function loadFile(f, setFile, setPreview) {
@@ -103,13 +111,15 @@ export default function NewCheck() {
         base64:      frontBase64,
         mimeType:    frontFile.type,
         backBase64,
-        backMimeType: backFile?.type || null,
+        backMimeType:    backFile?.type || null,
         productName,
         productCategory: category,
         extraContext,
-        regulations: regs,
+        regulations:     regs,
         styleRules,
         track,
+        logoChecks,
+        logoTogglesDefs: logoToggles,
       })
       setResult(res)
     } catch (ex) {
@@ -197,9 +207,15 @@ export default function NewCheck() {
     }
   }
 
-  const failItems = result?.items?.filter(i => i.status === 'FAIL')    || []
-  const warnItems = result?.items?.filter(i => i.status === 'WARNING') || []
-  const passItems = result?.items?.filter(i => i.status === 'PASS')    || []
+  const allItems  = result?.items || []
+  const logoItems = allItems.filter(i => i.regulation === 'Logo / Mark Check')
+  const regItems  = allItems.filter(i => i.regulation !== 'Logo / Mark Check')
+  const failItems = regItems.filter(i => i.status === 'FAIL')
+  const warnItems = regItems.filter(i => i.status === 'WARNING')
+  const passItems = regItems.filter(i => i.status === 'PASS')
+  const logoFail  = logoItems.filter(i => i.status === 'FAIL')
+  const logoWarn  = logoItems.filter(i => i.status === 'WARNING')
+  const logoPass  = logoItems.filter(i => i.status === 'PASS')
 
   return (
     <div>
@@ -395,6 +411,41 @@ export default function NewCheck() {
             </div>
           </div>
 
+          {/* Logo & Mark Checks */}
+          <div className="card">
+            <div className="card-header">
+              <span className="card-title">Logo & Mark Checks</span>
+              {activeLogoCount > 0 && (
+                <span style={{ fontSize: 11, color: 'var(--text-3)' }}>{activeLogoCount} active</span>
+              )}
+            </div>
+            <div className="card-body">
+              <div className="toggle-group">
+                {logoToggles.map(({ key, label, sub, icon }) => (
+                  <div
+                    key={key}
+                    className={`toggle-row${logoChecks[key] ? ' active' : ''}`}
+                    onClick={() => setLogoChecks(l => ({ ...l, [key]: !l[key] }))}
+                  >
+                    <div className="toggle-info">
+                      <span className="toggle-icon">{icon}</span>
+                      <div>
+                        <div className="toggle-label">{label}</div>
+                        <div className="toggle-sub">{sub}</div>
+                      </div>
+                    </div>
+                    <div className={`toggle-switch${logoChecks[key] ? ' on' : ''}`} />
+                  </div>
+                ))}
+              </div>
+              {activeLogoCount === 0 && (
+                <p style={{ fontSize: 11, color: 'var(--text-3)', marginTop: 8 }}>
+                  No logo checks active — enable toggles above to check for marks and symbols
+                </p>
+              )}
+            </div>
+          </div>
+
           {error && <div className="error-msg">{error}</div>}
 
           <button
@@ -481,6 +532,21 @@ export default function NewCheck() {
                   <h3>✅ Passed ({passItems.length})</h3>
                   <div className="issue-list">
                     {passItems.map((item, i) => <IssueCard key={i} item={item} />)}
+                  </div>
+                </div>
+              )}
+
+              {/* Logo & Mark results */}
+              {logoItems.length > 0 && (
+                <div className="issues-section">
+                  <h3 style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <span>🔍 Logo & Mark Checks ({logoItems.length})</span>
+                    {logoFail.length > 0 && <span className="badge badge-fail" style={{ fontSize: 10 }}>{logoFail.length} failed</span>}
+                    {logoWarn.length > 0 && <span className="badge badge-warn" style={{ fontSize: 10 }}>{logoWarn.length} warn</span>}
+                    {logoPass.length > 0 && <span className="badge badge-pass" style={{ fontSize: 10 }}>{logoPass.length} pass</span>}
+                  </h3>
+                  <div className="issue-list">
+                    {logoItems.map((item, i) => <IssueCard key={i} item={item} />)}
                   </div>
                 </div>
               )}

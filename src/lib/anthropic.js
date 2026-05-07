@@ -15,6 +15,8 @@ const ANTHROPIC_API_KEY = import.meta.env.VITE_ANTHROPIC_API_KEY
  * @param {Object} opts.regulations   - Active regulation toggle keys
  * @param {Array}  opts.styleRules    - Active style rules from DB
  * @param {string} opts.track         - 'cosmetic' | 'drug'
+ * @param {Object} [opts.logoChecks]  - Active logo/mark check keys (optional)
+ * @param {Array}  [opts.logoTogles]  - Full logo toggle definitions for enabled keys
  */
 export async function analyseLabel({
   base64,
@@ -27,12 +29,18 @@ export async function analyseLabel({
   regulations,
   styleRules,
   track = 'cosmetic',
+  logoChecks = {},
+  logoTogglesDefs = [],
 }) {
   const hasBack = Boolean(backBase64 && backMimeType)
 
+  // Build logo section from active toggles
+  const activeLogoToggles = logoTogglesDefs.filter(t => logoChecks[t.key])
+  const logoSection = buildLogoSection(activeLogoToggles)
+
   const systemPrompt = track === 'drug'
-    ? buildDrugPrompt({ regulations, styleRules, extraContext, productCategory, hasBack })
-    : buildCosmeticPrompt({ regulations, styleRules, extraContext, productCategory, hasBack })
+    ? buildDrugPrompt({ regulations, styleRules, extraContext, productCategory, hasBack, logoSection })
+    : buildCosmeticPrompt({ regulations, styleRules, extraContext, productCategory, hasBack, logoSection })
 
   // Build content array — front face always first, back face appended when available
   const userContent = []
@@ -268,8 +276,20 @@ Return ONLY valid JSON matching this exact schema:
 Score rubric: 100 = perfect, deduct 10 per FAIL item, 5 per WARNING item.
 verdict = "PASS" if score >= 80 and no FAIL items, "FAIL" if any FAIL items or score < 60, otherwise "REVIEW_REQUIRED".`
 
+// ── LOGO SECTION BUILDER ─────────────────────────────────────────────────
+function buildLogoSection(activeToggles) {
+  if (!activeToggles || activeToggles.length === 0) return ''
+  const lines = activeToggles.map((t, i) => `${i + 1}. ${t.prompt}`).join('\n\n')
+  return `
+
+LOGO & MARK CHECKS — VISUAL INSPECTION REQUIRED
+For each item below, carefully examine the label image(s) and check for the presence, legibility, and correctness of the specified mark or symbol. Generate a separate item entry in the JSON "items" array for each logo check, using "Logo / Mark Check" as the regulation field.
+
+${lines}`
+}
+
 // ── COSMETIC PROMPT ──────────────────────────────────────────────────────
-function buildCosmeticPrompt({ regulations, styleRules, extraContext, productCategory, hasBack }) {
+function buildCosmeticPrompt({ regulations, styleRules, extraContext, productCategory, hasBack, logoSection = '' }) {
   const regulationList = []
   if (regulations.cosmetics)
     regulationList.push('Cosmetics Rules 2020 (India) — all mandatory label declarations')
@@ -336,11 +356,12 @@ ${regulationList.map((r, i) => `${i + 1}. ${r}`).join('\n')}
 ${mandatoryChecklist}
 ${styleSection}
 ${extraContext ? `\nADDITIONAL CONTEXT FROM USER:\n${extraContext}` : ''}
+${logoSection}
 ${JSON_SCHEMA}`
 }
 
 // ── DRUG PROMPT ──────────────────────────────────────────────────────────
-function buildDrugPrompt({ regulations, styleRules, extraContext, productCategory, hasBack }) {
+function buildDrugPrompt({ regulations, styleRules, extraContext, productCategory, hasBack, logoSection = '' }) {
   const regulationList = []
   if (regulations.drug_act)
     regulationList.push(
@@ -417,5 +438,6 @@ IMPORTANT DRUG-SPECIFIC RULES:
 - If drug is Schedule H, H1, or X, the declaration text must appear verbatim as per Rules — paraphrasing is a FAIL
 - MRP must follow Legal Metrology format exactly
 - DLN (Drugs Licence Number) is mandatory — absence is a FAIL
+${logoSection}
 ${JSON_SCHEMA}`
 }
