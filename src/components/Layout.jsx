@@ -2,7 +2,8 @@ import { NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 
 const NAV = [
-  { to: '/',           label: 'Dashboard',    icon: '◈', end: true },
+  { to: '/',           label: 'Dashboard',    icon: '◈',  end: true },
+  { to: '/projects',   label: 'Projects',     icon: '📁' },
   { to: '/new-check',  label: 'New Check',    icon: '＋' },
   { to: '/history',    label: 'History',      icon: '◷' },
   { to: '/style-guide',label: 'Style Guide',  icon: '◉' },
@@ -10,11 +11,13 @@ const NAV = [
 ]
 
 const PAGE_TITLES = {
-  '/':            'Dashboard',
-  '/new-check':   'New Compliance Check',
-  '/history':     'Check History',
-  '/style-guide': 'Style Guide',
-  '/regulations': 'Regulation Library',
+  '/':               'Dashboard',
+  '/projects':       'Projects',
+  '/projects/new':   'New Project',
+  '/new-check':      'New Compliance Check',
+  '/history':        'Check History',
+  '/style-guide':    'Style Guide',
+  '/regulations':    'Regulation Library',
 }
 
 export default function Layout() {
@@ -28,7 +31,8 @@ export default function Layout() {
 
   const pageTitle =
     PAGE_TITLES[location.pathname] ||
-    (location.pathname.startsWith('/checks/') ? 'Check Detail' : '')
+    (location.pathname.startsWith('/checks/') ? 'Check Detail' :
+     location.pathname.startsWith('/projects/') ? 'Project Detail' : '')
 
   async function handleSignOut() {
     await signOut()

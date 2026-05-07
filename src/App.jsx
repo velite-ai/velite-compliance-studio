@@ -3,6 +3,9 @@ import { useAuth } from './context/AuthContext'
 import Layout from './components/Layout'
 import Login from './pages/Login'
 import Dashboard from './pages/Dashboard'
+import Projects from './pages/Projects'
+import NewProject from './pages/NewProject'
+import ProjectDetail from './pages/ProjectDetail'
 import NewCheck from './pages/NewCheck'
 import History from './pages/History'
 import CheckDetail from './pages/CheckDetail'
@@ -32,6 +35,9 @@ export default function App() {
         }
       >
         <Route index element={<Dashboard />} />
+        <Route path="projects" element={<Projects />} />
+        <Route path="projects/new" element={<NewProject />} />
+        <Route path="projects/:id" element={<ProjectDetail />} />
         <Route path="new-check" element={<NewCheck />} />
         <Route path="history" element={<History />} />
         <Route path="checks/:id" element={<CheckDetail />} />
