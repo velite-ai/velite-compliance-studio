@@ -14,6 +14,13 @@ import Regulations from './pages/Regulations'
 import TextGenerator from './pages/TextGenerator'
 import ExportCompliance from './pages/ExportCompliance'
 import Guidelines from './pages/Guidelines'
+import QCDashboard from './pages/qc/QCDashboard'
+import Specifications from './pages/qc/Specifications'
+import NewSpecification from './pages/qc/NewSpecification'
+import Batches from './pages/qc/Batches'
+import NewBatch from './pages/qc/NewBatch'
+import BatchDetail from './pages/qc/BatchDetail'
+import Deviations from './pages/qc/Deviations'
 
 function ProtectedRoute({ children }) {
   const { user, loading } = useAuth()
@@ -49,6 +56,15 @@ export default function App() {
         <Route path="regulations" element={<Regulations />} />
         <Route path="export" element={<ExportCompliance />} />
         <Route path="guidelines" element={<Guidelines />} />
+
+        {/* QC Module */}
+        <Route path="qc" element={<QCDashboard />} />
+        <Route path="qc/specs" element={<Specifications />} />
+        <Route path="qc/specs/new" element={<NewSpecification />} />
+        <Route path="qc/batches" element={<Batches />} />
+        <Route path="qc/batches/new" element={<NewBatch />} />
+        <Route path="qc/batches/:id" element={<BatchDetail />} />
+        <Route path="qc/deviations" element={<Deviations />} />
       </Route>
     </Routes>
   )

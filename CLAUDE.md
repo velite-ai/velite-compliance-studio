@@ -101,6 +101,19 @@ git add -A && git commit -m "..." && git push origin main   # triggers Vercel de
   - Memory: table of product_memory rows (open/resolved issues)
   - Assets: placeholder for Module 5
 
+#### QC Module — Phase 1 (Quality Control core) ✅ built
+- **Migration**: `supabase/schema-qc.sql` — RUN THIS in Supabase SQL editor (after schema-v2.sql).
+  Adds: `qc_specifications`, `qc_batches`, `qc_tests`, `qc_deviations`, `qc_capa`,
+  `profiles.role` column, view `qc_batch_overview`. Owner-based RLS (single shared login).
+- Entity mapping: `track = 'cosmetic'` → Velite Healthcare; `track = 'drug'` → Velite Pharmaceuticals.
+- `src/lib/qc.js` — constants + result evaluation helpers.
+- `src/lib/anthropic.js` — `suggestQCAnalysis()` (root cause + CAPA + disposition).
+- `src/lib/reports.js` — `generateCOAPDF()` (Certificate of Analysis).
+- Pages under `src/pages/qc/`: QCDashboard, Specifications, NewSpecification, Batches, NewBatch, BatchDetail, Deviations.
+- Routes `/qc`, `/qc/specs`, `/qc/batches`, `/qc/deviations` + sidebar "Quality Control" section.
+- QC flow: Spec → Batch → record results (auto pass/fail) → release/reject/quarantine → COA; deviation + CAPA on failures.
+- **Next QC phases**: Phase 2 Production (BOM/MBR, BMR, in-process), Phase 3 QA (roles/segregation of duties, e-signatures, audit trail, SOP control).
+
 ### ⏸ STOPPED MID-MODULE 1 — needs completion before building
 - `src/App.jsx` — routes for `/projects`, `/projects/new`, `/projects/:id` NOT YET ADDED
 - `src/components/Layout.jsx` — sidebar nav items NOT YET UPDATED

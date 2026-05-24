@@ -4,6 +4,12 @@ import { useAuth } from '../context/AuthContext'
 const NAV = [
   { to: '/',           label: 'Dashboard',    icon: '◈',  end: true },
   { to: '/projects',   label: 'Projects',     icon: '📁' },
+  { section: 'Quality Control' },
+  { to: '/qc',             label: 'QC Dashboard',   icon: '🔬', end: true },
+  { to: '/qc/batches',     label: 'Batches',        icon: '🧫' },
+  { to: '/qc/specs',       label: 'Specifications', icon: '📐' },
+  { to: '/qc/deviations',  label: 'Deviations & CAPA', icon: '⚠️' },
+  { section: 'Compliance' },
   { to: '/new-check',      label: 'New Check',      icon: '＋' },
   { to: '/text-generator', label: 'Text Generator', icon: '✏️' },
   { to: '/export',         label: 'Export Module',  icon: '🌍' },
@@ -17,6 +23,12 @@ const PAGE_TITLES = {
   '/':               'Dashboard',
   '/projects':       'Projects',
   '/projects/new':   'New Project',
+  '/qc':              'QC Dashboard',
+  '/qc/batches':      'Batches',
+  '/qc/batches/new':  'New Batch',
+  '/qc/specs':        'QC Specifications',
+  '/qc/specs/new':    'New Specification',
+  '/qc/deviations':   'Deviations & CAPA',
   '/new-check':       'New Compliance Check',
   '/text-generator':  'Label Text Generator',
   '/history':         'Check History',
@@ -38,6 +50,7 @@ export default function Layout() {
   const pageTitle =
     PAGE_TITLES[location.pathname] ||
     (location.pathname.startsWith('/checks/') ? 'Check Detail' :
+     location.pathname.startsWith('/qc/batches/') ? 'Batch QC' :
      location.pathname.startsWith('/projects/') ? 'Project Detail' : '')
 
   async function handleSignOut() {
@@ -55,16 +68,25 @@ export default function Layout() {
         </div>
 
         <nav className="sidebar-nav">
-          {NAV.map(({ to, label, icon, end }) => (
-            <NavLink
-              key={to}
-              to={to}
-              end={end}
-              className={({ isActive }) => 'nav-item' + (isActive ? ' active' : '')}
-            >
-              <span className="nav-icon">{icon}</span>
-              {label}
-            </NavLink>
+          {NAV.map((item, i) => (
+            item.section ? (
+              <div key={`sec-${i}`} style={{
+                fontSize: 10, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase',
+                color: 'rgba(255,255,255,.35)', padding: '14px 12px 4px',
+              }}>
+                {item.section}
+              </div>
+            ) : (
+              <NavLink
+                key={item.to}
+                to={item.to}
+                end={item.end}
+                className={({ isActive }) => 'nav-item' + (isActive ? ' active' : '')}
+              >
+                <span className="nav-icon">{item.icon}</span>
+                {item.label}
+              </NavLink>
+            )
           ))}
         </nav>
 
