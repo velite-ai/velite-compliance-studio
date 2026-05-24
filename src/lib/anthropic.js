@@ -742,6 +742,87 @@ Return this exact schema:
   return JSON.parse(cleaned)
 }
 
+// ── QC ASSIST: ROOT CAUSE + CAPA SUGGESTION ───────────────────────────────
+/**
+ * Given a failed QC batch, suggest a root-cause hypothesis, CAPA actions, and
+ * a disposition recommendation. Used on the Batch QC and Deviation screens.
+ *
+ * @param {Object}  opts
+ * @param {string}  opts.track          - 'cosmetic' | 'drug'
+ * @param {string}  opts.productName    - Product / material name
+ * @param {string}  opts.materialType   - raw_material | packaging | in_process | finished_good
+ * @param {string}  opts.batchNo        - Batch / lot number
+ * @param {Array}   opts.failedParams   - [{ name, expected, result, severity, note }]
+ * @param {Array}   [opts.pastIssues]   - [{ title, root_cause }] prior deviations for context
+ *
+ * Returns: { root_cause, capa: [{ action_type, description }], disposition, disposition_reason }
+ */
+export async function suggestQCAnalysis({ track, productName, materialType, batchNo, failedParams, pastIssues = [] }) {
+  const isDrug = track === 'drug'
+  const regContext = isDrug
+    ? 'Indian pharmaceutical GMP (Drugs & Cosmetics Act 1940, revised Schedule M). A QC unit must be independent of production and may reject batches.'
+    : 'Indian cosmetics GMP (Cosmetics Rules 2020) and Legal Metrology requirements.'
+
+  const failList = (failedParams || [])
+    .map((p, i) => `${i + 1}. ${p.name} — expected ${p.expected}, got "${p.result}" [severity: ${p.severity || 'major'}]${p.note ? ` (note: ${p.note})` : ''}`)
+    .join('\n')
+
+  const pastList = (pastIssues || []).length
+    ? `\nPRIOR DEVIATIONS ON THIS PRODUCT (for context):\n${pastIssues.map((d, i) => `${i + 1}. ${d.title}${d.root_cause ? ` — root cause: ${d.root_cause}` : ''}`).join('\n')}`
+    : ''
+
+  const systemPrompt = `You are a Quality Control expert for Velite, a small-scale ${isDrug ? 'pharmaceutical' : 'cosmetics'} manufacturer in India.
+Context: ${regContext}
+A batch has FAILED one or more QC specifications. Provide a concise, practical analysis suitable for a small production house — no generic filler.
+
+Return ONLY valid JSON — no markdown, no prose outside the JSON — matching this exact schema:
+{
+  "root_cause": "<the single most likely root cause, 1-2 sentences, specific to the failed parameters>",
+  "capa": [
+    { "action_type": "corrective" | "preventive", "description": "<a specific, actionable step>" }
+  ],
+  "disposition": "rejected" | "quarantine" | "on_hold",
+  "disposition_reason": "<1 sentence justifying the recommended disposition>"
+}
+Provide 2-4 CAPA actions (mix of corrective and preventive). A critical failure should normally lead to "rejected"; a borderline or investigable failure to "quarantine".`
+
+  const userMsg = `PRODUCT / MATERIAL: ${productName || '(unnamed)'}
+TYPE: ${materialType || 'finished_good'}
+BATCH No.: ${batchNo || '(none)'}
+
+FAILED PARAMETERS:
+${failList || '(none provided)'}
+${pastList}
+
+Analyse now. Return only the JSON.`
+
+  const response = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': ANTHROPIC_API_KEY,
+      'anthropic-version': '2023-06-01',
+      'anthropic-dangerous-direct-browser-access': 'true',
+    },
+    body: JSON.stringify({
+      model: 'claude-opus-4-5',
+      max_tokens: 1536,
+      system: systemPrompt,
+      messages: [{ role: 'user', content: userMsg }],
+    }),
+  })
+
+  if (!response.ok) {
+    const err = await response.text()
+    throw new Error(`Claude API error: ${response.status} — ${err}`)
+  }
+
+  const data    = await response.json()
+  const raw     = data.content?.[0]?.text || ''
+  const cleaned = raw.replace(/^```json\s*/i, '').replace(/```\s*$/i, '').trim()
+  return JSON.parse(cleaned)
+}
+
 // ── AUTO-LEARN STYLE RULES FROM APPROVED LABEL ────────────────────────────
 /**
  * Analyse an approved label image and extract reusable Velite style rules.

@@ -500,3 +500,164 @@ export function generateAnnotatedJPEG(imageUrl, markers, annotateItems) {
     img.src = imageUrl
   })
 }
+
+// ── CERTIFICATE OF ANALYSIS (COA) PDF ──────────────────────────────────────
+/**
+ * Certificate of Analysis for a tested batch.
+ * @param {Object} batch  - qc_batches row (with product_name, batch_no, track, …)
+ * @param {Object} test   - qc_tests row  (results[], overall_result, summary, tested_at)
+ * @param {Object} [meta] - { specName, entityName, testedByName }
+ * @returns jsPDF doc
+ */
+export async function generateCOAPDF(batch, test, meta = {}) {
+  const { default: jsPDF } = await import('jspdf')
+  const doc    = new jsPDF({ unit: 'mm', format: 'a4' })
+  const tColor = trackColor(batch.track)
+  const rows   = test?.results || []
+  const passed = test?.overall_result === 'pass'
+
+  // ── Header ────────────────────────────────────────────────────────────────
+  doc.setFillColor(...tColor)
+  doc.rect(0, 0, W, 22, 'F')
+  doc.setTextColor(...C.white)
+  doc.setFontSize(13)
+  doc.setFont('helvetica', 'bold')
+  doc.text('CERTIFICATE OF ANALYSIS', M, 9)
+  doc.setFontSize(7.5)
+  doc.setFont('helvetica', 'normal')
+  doc.text(`${meta.entityName || 'Velite'}  ·  ${batch.track === 'drug' ? 'Pharmaceuticals' : 'Healthcare'}`, M, 15)
+  const dateStr = test?.tested_at
+    ? new Date(test.tested_at).toLocaleDateString('en-IN', { day: '2-digit', month: 'long', year: 'numeric' })
+    : new Date().toLocaleDateString('en-IN', { day: '2-digit', month: 'long', year: 'numeric' })
+  doc.text(`Tested: ${dateStr}`, W - M, 15, { align: 'right' })
+
+  let y = 32
+
+  // ── Batch detail block ──────────────────────────────────────────────────
+  doc.setTextColor(...C.dark)
+  doc.setFontSize(16)
+  doc.setFont('helvetica', 'bold')
+  const nameLines = doc.splitTextToSize(batch.product_name || 'Batch', CW - 45)
+  doc.text(nameLines, M, y)
+  y += nameLines.length * 6 + 2
+
+  // Result stamp (top-right)
+  const rColor = passed ? C.pass : (test?.overall_result === 'fail' ? C.red : C.gray)
+  const rText  = passed ? 'PASS' : (test?.overall_result === 'fail' ? 'FAIL' : 'PENDING')
+  doc.setDrawColor(...rColor)
+  doc.setLineWidth(0.8)
+  doc.roundedRect(W - M - 38, 30, 38, 14, 2, 2, 'S')
+  doc.setTextColor(...rColor)
+  doc.setFontSize(15)
+  doc.setFont('helvetica', 'bold')
+  doc.text(rText, W - M - 19, 39, { align: 'center' })
+
+  const fields = [
+    ['Batch / Lot No.', batch.batch_no || '—'],
+    ['Material Type',   (batch.material_type || '').replace('_', ' ')],
+    ['Specification',   meta.specName || '—'],
+    ['Quantity',        batch.quantity ? `${batch.quantity} ${batch.uom || ''}`.trim() : '—'],
+    ['Mfg. Date',       batch.mfg_date || '—'],
+    ['Expiry Date',     batch.expiry_date || '—'],
+    ['Supplier',        batch.supplier || '—'],
+    ['Tested By',       meta.testedByName || '—'],
+  ]
+  doc.setFontSize(8)
+  const colW = CW / 2
+  fields.forEach((f, i) => {
+    const col = i % 2
+    const fx  = M + col * colW
+    if (col === 0) y = (i === 0) ? y + 2 : y + 6
+    doc.setTextColor(...C.gray)
+    doc.setFont('helvetica', 'normal')
+    doc.text(`${f[0]}:`, fx, y)
+    doc.setTextColor(...C.dark)
+    doc.setFont('helvetica', 'bold')
+    doc.text(String(f[1]), fx + 28, y)
+  })
+  y += 8
+
+  // ── Results table ─────────────────────────────────────────────────────────
+  doc.setDrawColor(...C.gray)
+  doc.setLineWidth(0.2)
+  doc.line(M, y, W - M, y)
+  y += 5
+
+  doc.setFillColor(...tColor)
+  doc.rect(M, y, CW, 7, 'F')
+  doc.setTextColor(...C.white)
+  doc.setFontSize(7.5)
+  doc.setFont('helvetica', 'bold')
+  doc.text('PARAMETER', M + 2, y + 4.8)
+  doc.text('SPECIFICATION', M + 70, y + 4.8)
+  doc.text('RESULT', M + 122, y + 4.8)
+  doc.text('STATUS', W - M - 16, y + 4.8)
+  y += 9
+
+  rows.forEach((r, idx) => {
+    const nameLn = doc.splitTextToSize(r.name || '—', 64)
+    const rowH   = Math.max(7, nameLn.length * 4 + 3)
+    y = cy(doc, y, rowH + 2)
+    doc.setFillColor(...(idx % 2 === 0 ? C.white : C.surface))
+    doc.rect(M, y, CW, rowH, 'F')
+
+    doc.setTextColor(...C.dark)
+    doc.setFontSize(7.5)
+    doc.setFont('helvetica', 'bold')
+    doc.text(nameLn, M + 2, y + 4.5)
+
+    doc.setFont('helvetica', 'normal')
+    doc.setTextColor(...C.mid)
+    doc.text(doc.splitTextToSize(String(r.expected ?? '—'), 48)[0] || '—', M + 70, y + 4.5)
+    doc.setTextColor(...C.dark)
+    doc.text(doc.splitTextToSize(String(r.result ?? '—'), 38)[0] || '—', M + 122, y + 4.5)
+
+    const sc = r.pass === true ? C.pass : r.pass === false ? C.red : C.gray
+    const st = r.pass === true ? 'PASS' : r.pass === false ? 'FAIL' : '—'
+    doc.setTextColor(...sc)
+    doc.setFont('helvetica', 'bold')
+    doc.text(st, W - M - 16, y + 4.5)
+
+    y += rowH
+  })
+
+  y += 6
+  if (test?.summary) {
+    y = cy(doc, y, 16)
+    const sumLines = doc.splitTextToSize(test.summary, CW - 8)
+    const boxH = sumLines.length * 4.5 + 7
+    doc.setFillColor(...C.surface)
+    doc.roundedRect(M, y, CW, boxH, 2, 2, 'F')
+    doc.setTextColor(...C.mid)
+    doc.setFontSize(8)
+    doc.setFont('helvetica', 'normal')
+    doc.text(sumLines, M + 4, y + 5)
+    y += boxH + 4
+  }
+
+  // ── Sign-off ────────────────────────────────────────────────────────────
+  y = cy(doc, y, 30)
+  y += 8
+  doc.setDrawColor(...C.gray)
+  doc.setLineWidth(0.3)
+  doc.line(M, y, W - M, y)
+  y += 8
+  doc.setTextColor(...C.gray)
+  doc.setFontSize(7.5)
+  doc.setFont('helvetica', 'bold')
+  doc.text('QC ANALYST', M, y)
+  doc.text('QA / AUTHORISED PERSON', M + 108, y)
+  y += 12
+  doc.setDrawColor(...C.gray)
+  doc.line(M, y, M + 70, y)
+  doc.line(M + 108, y, M + 178, y)
+  y += 4
+  doc.setFont('helvetica', 'normal')
+  doc.setFontSize(7)
+  doc.setTextColor(...C.gray)
+  doc.text('Signature & Date', M, y)
+  doc.text('Signature & Date', M + 108, y)
+
+  addFooter(doc)
+  return doc
+}
