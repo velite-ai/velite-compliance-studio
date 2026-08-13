@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { supabase } from '../lib/supabase'
 import { analyseLabel } from '../lib/anthropic'
+import { runDeterministicChecks } from '../lib/preChecks'
 import {
   PRODUCT_CATEGORIES,
   REGULATION_TOGGLES,
@@ -154,6 +155,25 @@ export default function NewCheck() {
         openIssues:  openMemoryIssues,
         guidelines:  relevantGuidelines,
       })
+
+      // ── Deterministic post-checks (zero API cost) ───────────────────
+      // Run regex/lookup rules over the text Claude transcribed and merge
+      // any new findings not already reported by the AI. This catches things
+      // like MRP-format defects and banned-ingredient hits that vision can
+      // miss, and gives QA a second, deterministic source of truth.
+      const aiText          = res.extracted_text || ''
+      const aiFieldsLc      = new Set((res.items || []).map(i => (i.field || '').toLowerCase()))
+      const detFindings     = runDeterministicChecks({ track, text: aiText })
+        .filter(f => !aiFieldsLc.has((f.field || '').toLowerCase().replace(/ \(deterministic\)$/, '')))
+      if (detFindings.length) {
+        res.items = [...(res.items || []), ...detFindings]
+        // recount for the header
+        const b = res.items.filter(i => i.severity === 'blocker'  || (!i.severity && i.status === 'FAIL')).length
+        const m = res.items.filter(i => i.severity === 'major').length
+        const a = res.items.filter(i => i.severity === 'advisory' || (!i.severity && i.status === 'WARNING')).length
+        res.counts  = { blockers: b, majors: m, advisories: a }
+        res.verdict = b > 0 ? 'FAIL' : m > 0 ? 'REVIEW_REQUIRED' : (res.verdict || 'PASS')
+      }
       setResult(res)
     } catch (ex) {
       setError('Analysis failed: ' + ex.message)

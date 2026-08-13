@@ -63,18 +63,51 @@ export default function CheckDetail() {
     setLoading(false)
   }
 
-  async function approve() {
+  // ── 2-signature approval ──────────────────────────────────────────────
+  // Reviewer signs first, then QA signs. Once both are signed the record
+  // is fully approved (is_fully_approved=true) and treated as locked in the
+  // audit trail. Same user can technically sign both slots (small team) —
+  // but each signature is a distinct explicit action with its own timestamp.
+  async function signAs(role) {
+    if (!user) return
+    const now      = new Date().toISOString()
+    const signerName = user.profile?.full_name || user.email || 'Unknown'
+
+    // Fetch the display name for the audit trail (frozen at sign time)
+    let displayName = signerName
+    try {
+      const { data: prof } = await supabase.from('profiles').select('full_name').eq('id', user.id).single()
+      if (prof?.full_name) displayName = prof.full_name
+    } catch { /* fall back to email */ }
+
+    if (!confirm(
+      role === 'reviewer'
+        ? `Sign this report as REVIEWER (Packaging Compliance)?\n\nName recorded: ${displayName}\nDate: ${format(new Date(), 'dd MMM yyyy HH:mm')}\n\nThis signature is part of the permanent audit trail.`
+        : `Sign this report as QA (Quality Assurance)?\n\nName recorded: ${displayName}\nDate: ${format(new Date(), 'dd MMM yyyy HH:mm')}\n\nOnce QA signs, this record will be fully approved and locked from further edits.`
+    )) return
+
     setApproving(true)
-    await supabase.from('checks').update({
-      is_approved: true,
-      approved_at: new Date().toISOString(),
-      approved_by: user.id,
-    }).eq('id', id)
-    setCheck(c => ({ ...c, is_approved: true, approved_at: new Date().toISOString() }))
+    const patch = role === 'reviewer'
+      ? { reviewer_signed_by: user.id, reviewer_signed_at: now, reviewer_signed_name: displayName }
+      : { qa_signed_by: user.id, qa_signed_at: now, qa_signed_name: displayName }
+
+    // If this signature completes the pair, flip the fully-approved flags
+    const willBeFullyApproved =
+      (role === 'reviewer' && check?.qa_signed_at)   ||
+      (role === 'qa'       && check?.reviewer_signed_at)
+
+    if (willBeFullyApproved) {
+      patch.is_fully_approved = true
+      patch.fully_approved_at = now
+      // Keep the legacy is_approved flag in sync for old dashboards
+      patch.is_approved = true
+      patch.approved_at = now
+      patch.approved_by = user.id
+    }
+
+    await supabase.from('checks').update(patch).eq('id', id)
+    setCheck(c => ({ ...c, ...patch }))
     setApproving(false)
-    // (Silent auto-learn removed — was burning an API call per approval and
-    // polluting the Style Guide with vague brand rules. Style rules are now
-    // added deliberately from the Style Guide page.)
   }
 
   async function saveNotes() {
@@ -206,20 +239,11 @@ export default function CheckDetail() {
       <div style={{ display: 'flex', gap: 12, marginBottom: 20 }}>
         <button className="btn btn-ghost btn-sm" onClick={() => navigate(-1)}>← Back</button>
         <div style={{ flex: 1 }} />
-        {!check.is_approved && (
-          <button className="btn btn-success" onClick={approve} disabled={approving}>
-            {approving ? <><span className="spinner" /> Approving…</> : '✓ Approve Label'}
-          </button>
-        )}
         <button className="btn btn-primary" onClick={exportPDF}>⬇ Export PDF</button>
       </div>
 
-      {check.is_approved && (
-        <div className="approved-banner">
-          ✓ Approved on {check.approved_at ? format(parseISO(check.approved_at), 'dd MMM yyyy') : ''}
-          {check.notes && <span style={{ fontSize: 11, color: 'var(--pass)', marginLeft: 8 }}>· Notes saved</span>}
-        </div>
-      )}
+      {/* 2-signature approval widget */}
+      <SignoffPanel check={check} onSign={signAs} approving={approving} />
 
       {/* Printable area */}
       <div ref={reportRef} id="pdf-report">
@@ -583,3 +607,77 @@ export default function CheckDetail() {
   )
 }
 
+// 2-signature approval widget: Reviewer + QA. Once both signed, the record
+// is locked (is_fully_approved=true) and shown as an immutable audit trail.
+function SignoffPanel({ check, onSign, approving }) {
+  const rSigned = !!check.reviewer_signed_at
+  const qSigned = !!check.qa_signed_at
+  const locked  = !!check.is_fully_approved
+
+  return (
+    <div className={`signoff-panel ${locked ? 'locked' : ''}`}>
+      <div className="signoff-header">
+        <span className="signoff-title">
+          {locked ? '🔒 Fully Approved — Audit Trail Locked' : '✍️ Approval — 2 Signatures Required'}
+        </span>
+        <span className="signoff-progress">
+          {(rSigned ? 1 : 0) + (qSigned ? 1 : 0)} / 2 signed
+        </span>
+      </div>
+
+      <div className="signoff-slots">
+        {/* Reviewer slot */}
+        <div className={`signoff-slot ${rSigned ? 'signed' : ''}`}>
+          <div className="signoff-slot-role">Reviewer · Packaging Compliance</div>
+          {rSigned ? (
+            <>
+              <div className="signoff-slot-name">✓ {check.reviewer_signed_name || 'Unknown'}</div>
+              <div className="signoff-slot-date">
+                {format(parseISO(check.reviewer_signed_at), 'dd MMM yyyy · HH:mm')}
+              </div>
+            </>
+          ) : (
+            <button
+              className="btn btn-primary btn-sm"
+              onClick={() => onSign('reviewer')}
+              disabled={approving}
+              style={{ marginTop: 6 }}
+            >
+              {approving ? <><span className="spinner" /> …</> : 'Sign as Reviewer'}
+            </button>
+          )}
+        </div>
+
+        {/* QA slot */}
+        <div className={`signoff-slot ${qSigned ? 'signed' : ''}`}>
+          <div className="signoff-slot-role">QA · Quality Assurance</div>
+          {qSigned ? (
+            <>
+              <div className="signoff-slot-name">✓ {check.qa_signed_name || 'Unknown'}</div>
+              <div className="signoff-slot-date">
+                {format(parseISO(check.qa_signed_at), 'dd MMM yyyy · HH:mm')}
+              </div>
+            </>
+          ) : (
+            <button
+              className="btn btn-success btn-sm"
+              onClick={() => onSign('qa')}
+              disabled={approving || !rSigned}
+              title={!rSigned ? 'Reviewer must sign first' : ''}
+              style={{ marginTop: 6 }}
+            >
+              {approving ? <><span className="spinner" /> …</> : 'Sign as QA'}
+            </button>
+          )}
+        </div>
+      </div>
+
+      {locked && (
+        <div className="signoff-locked-note">
+          This record is part of the compliance audit trail. Approved on{' '}
+          {check.fully_approved_at ? format(parseISO(check.fully_approved_at), 'dd MMM yyyy') : ''}.
+        </div>
+      )}
+    </div>
+  )
+}

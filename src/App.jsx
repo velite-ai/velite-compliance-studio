@@ -7,6 +7,7 @@ import Projects from './pages/Projects'
 import NewProject from './pages/NewProject'
 import ProjectDetail from './pages/ProjectDetail'
 import NewCheck from './pages/NewCheck'
+import BatchCheck from './pages/BatchCheck'
 import History from './pages/History'
 import CheckDetail from './pages/CheckDetail'
 import StyleGuide from './pages/StyleGuide'
@@ -49,6 +50,7 @@ export default function App() {
         <Route path="projects/new" element={<NewProject />} />
         <Route path="projects/:id" element={<ProjectDetail />} />
         <Route path="new-check" element={<NewCheck />} />
+        <Route path="batch-check" element={<BatchCheck />} />
         <Route path="text-generator" element={<TextGenerator />} />
         <Route path="history" element={<History />} />
         <Route path="checks/:id" element={<CheckDetail />} />

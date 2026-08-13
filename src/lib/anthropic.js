@@ -270,6 +270,7 @@ Return ONLY valid JSON matching this exact schema:
   "verdict": "PASS" | "FAIL" | "REVIEW_REQUIRED",
   "counts": { "blockers": <int>, "majors": <int>, "advisories": <int> },
   "summary": "<2-3 sentence overall assessment for the reviewer>",
+  "extracted_text": "<the FULL text you see on the label — verbatim, all faces combined, preserving line breaks with \\n. This is used for deterministic post-checks (MRP format, banned-ingredient lookup, mandatory-phrase presence). Do NOT paraphrase or summarise. Empty string if the image is unreadable.>",
   "items": [
     {
       "field": "<short label field name, e.g. 'MRP', 'Storage Instructions'>",
