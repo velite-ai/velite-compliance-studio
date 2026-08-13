@@ -1,6 +1,9 @@
 import { NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 
+// Nav items marked `optional: true` render dimmer with a tooltip — they still
+// work fully. This nudges the team toward the core compliance flow (Projects →
+// New Check) without hiding capability the team may need occasionally.
 const NAV = [
   { to: '/',           label: 'Dashboard',    icon: '◈',  end: true },
   { to: '/projects',   label: 'Projects',     icon: '📁' },
@@ -11,8 +14,10 @@ const NAV = [
   { to: '/qc/deviations',  label: 'Deviations & CAPA', icon: '⚠️' },
   { section: 'Compliance' },
   { to: '/new-check',      label: 'New Check',      icon: '＋' },
-  { to: '/text-generator', label: 'Text Generator', icon: '✏️' },
-  { to: '/export',         label: 'Export Module',  icon: '🌍' },
+  { to: '/text-generator', label: 'Text Generator', icon: '✏️',
+    optional: true, hint: 'Use only when drafting label copy from scratch — the main New Check flow is usually enough.' },
+  { to: '/export',         label: 'Export Module',  icon: '🌍',
+    optional: true, hint: 'Use only for products going to EU / US / GCC etc. Export rules are AI-inferred — verify with the target-market regulator before print.' },
   { to: '/history',        label: 'History',        icon: '◷' },
   { to: '/guidelines',     label: 'Guidelines',     icon: '📚' },
   { to: '/style-guide',    label: 'Style Guide',    icon: '◉' },
@@ -81,10 +86,16 @@ export default function Layout() {
                 key={item.to}
                 to={item.to}
                 end={item.end}
-                className={({ isActive }) => 'nav-item' + (isActive ? ' active' : '')}
+                title={item.hint || undefined}
+                className={({ isActive }) =>
+                  'nav-item' + (isActive ? ' active' : '') + (item.optional ? ' nav-optional' : '')
+                }
               >
                 <span className="nav-icon">{item.icon}</span>
                 {item.label}
+                {item.optional && (
+                  <span className="nav-optional-badge" title={item.hint}>?</span>
+                )}
               </NavLink>
             )
           ))}

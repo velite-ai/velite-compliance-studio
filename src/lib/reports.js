@@ -172,8 +172,10 @@ export async function generateCompliancePDF(check) {
     y += 9.5
 
     sItems.forEach((item, idx) => {
-      const issueLines = item.issue          ? doc.splitTextToSize(item.issue,          CW - 28) : []
-      const recLines   = item.recommendation ? doc.splitTextToSize(item.recommendation, CW - 28) : []
+      // Prefer the new schema's exact fix text over the vague recommendation.
+      const fixText    = item.required_text || item.recommendation || ''
+      const issueLines = item.issue ? doc.splitTextToSize(item.issue, CW - 28) : []
+      const recLines   = fixText    ? doc.splitTextToSize(fixText,    CW - 28) : []
       const rowH = 8 + (issueLines.length + recLines.length) * 3.8 + 4
       y = cy(doc, y, rowH)
 
@@ -197,12 +199,13 @@ export async function generateCompliancePDF(check) {
       const fieldStr  = doc.splitTextToSize(item.field || '—', maxFieldW)[0]
       doc.text(fieldStr, M + 3, y + 6)
 
-      // Regulation
-      if (item.regulation) {
+      // Regulation + section number (e.g. "Cosmetics Rules 2020 · Rule 45(f)")
+      const regStr = [item.regulation, item.regulation_section].filter(Boolean).join(' · ')
+      if (regStr) {
         doc.setFontSize(6.5)
         doc.setFont('helvetica', 'normal')
         doc.setTextColor(...C.gray)
-        doc.text(item.regulation, M + 3, y + 10)
+        doc.text(regStr, M + 3, y + 10)
       }
 
       let iy = y + 13.5
@@ -339,8 +342,9 @@ export async function generateDesignerBriefPDF(check) {
     actionItems.forEach((item, i) => {
       const isFail     = item.status === 'FAIL'
       const bColor     = isFail ? C.red : C.warn
-      const issueLines = item.issue          ? doc.splitTextToSize(item.issue,          CW - 26) : []
-      const recLines   = item.recommendation ? doc.splitTextToSize(item.recommendation, CW - 26) : []
+      const fixText    = item.required_text || item.recommendation || ''
+      const issueLines = item.issue ? doc.splitTextToSize(item.issue, CW - 26) : []
+      const recLines   = fixText    ? doc.splitTextToSize(fixText,    CW - 26) : []
       const boxH = 11 + (issueLines.length + recLines.length) * 4 + 4
 
       y = cy(doc, y, boxH + 4)
@@ -376,12 +380,13 @@ export async function generateDesignerBriefPDF(check) {
       doc.setFont('helvetica', 'bold')
       doc.text(item.field || '—', M + 19, y + 7.5)
 
-      // Regulation
-      if (item.regulation) {
+      // Regulation + section (e.g. "D&C Rules 1945 · Rule 96(c)")
+      const regStr = [item.regulation, item.regulation_section].filter(Boolean).join(' · ')
+      if (regStr) {
         doc.setFontSize(6.5)
         doc.setFont('helvetica', 'normal')
         doc.setTextColor(...C.gray)
-        doc.text(item.regulation, M + 19, y + 12)
+        doc.text(regStr, M + 19, y + 12)
       }
 
       let iy = y + 16

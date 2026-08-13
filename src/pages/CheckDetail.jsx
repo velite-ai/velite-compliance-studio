@@ -2,13 +2,12 @@ import { useEffect, useRef, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
-import ScoreCircle from '../components/ScoreCircle'
 import VerdictBadge from '../components/VerdictBadge'
 import TrackBadge from '../components/TrackBadge'
 import CheckTypeBadge from '../components/CheckTypeBadge'
 import { format, parseISO } from 'date-fns'
 import { generateCompliancePDF, generateDesignerBriefPDF, generateAnnotatedJPEG } from '../lib/reports'
-import { learnStyleRulesFromLabel } from '../lib/anthropic'
+import { ActionableIssueCard, SeverityBreakdown } from './NewCheck'
 
 export default function CheckDetail() {
   const { id } = useParams()
@@ -36,10 +35,6 @@ export default function CheckDetail() {
 
   // ── Reports state ──────────────────────────────────────────────────────
   const [generatingReport, setGeneratingReport] = useState(null) // 'compliance' | 'brief' | 'jpeg' | null
-
-  // ── Auto-learn state ──────────────────────────────────────────────────
-  const [learningRules, setLearningRules] = useState(false)
-  const [learnedCount,  setLearnedCount]  = useState(null) // number | null
 
   useEffect(() => { load() }, [id])
 
@@ -77,58 +72,9 @@ export default function CheckDetail() {
     }).eq('id', id)
     setCheck(c => ({ ...c, is_approved: true, approved_at: new Date().toISOString() }))
     setApproving(false)
-
-    // 7B: Auto-learn style rules from the approved label image
-    if (frontUrl) {
-      setLearningRules(true)
-      try {
-        const { base64, mimeType } = await urlToBase64(frontUrl)
-        // Fetch existing rule titles to avoid duplicates
-        const { data: existingRules } = await supabase
-          .from('style_rules').select('title').eq('is_active', true)
-        const existingTitles = (existingRules || []).map(r => r.title)
-
-        const { rules } = await learnStyleRulesFromLabel({
-          check,
-          base64,
-          mimeType,
-          existingRuleTitles: existingTitles,
-        })
-
-        if (rules?.length) {
-          await supabase.from('style_rules').insert(rules.map(r => ({
-            category:          r.category || 'general',
-            title:             r.title,
-            description:       r.description,
-            example_correct:   r.example_correct || null,
-            example_incorrect: r.example_incorrect || null,
-            source:            'auto-learned',
-            is_active:         true,
-            created_by:        user?.id,
-            check_id:          id,
-            project_id:        check.project_id || null,
-          })))
-          setLearnedCount(rules.length)
-        } else {
-          setLearnedCount(0)
-        }
-      } catch (e) {
-        console.error('Auto-learn failed:', e)
-        setLearnedCount(0)
-      }
-      setLearningRules(false)
-    }
-  }
-
-  async function urlToBase64(url) {
-    const res  = await fetch(url)
-    const blob = await res.blob()
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader()
-      reader.onload  = () => resolve({ base64: reader.result.split(',')[1], mimeType: blob.type })
-      reader.onerror = reject
-      reader.readAsDataURL(blob)
-    })
+    // (Silent auto-learn removed — was burning an API call per approval and
+    // polluting the Style Guide with vague brand rules. Style rules are now
+    // added deliberately from the Style Guide page.)
   }
 
   async function saveNotes() {
@@ -272,19 +218,6 @@ export default function CheckDetail() {
         <div className="approved-banner">
           ✓ Approved on {check.approved_at ? format(parseISO(check.approved_at), 'dd MMM yyyy') : ''}
           {check.notes && <span style={{ fontSize: 11, color: 'var(--pass)', marginLeft: 8 }}>· Notes saved</span>}
-          {learningRules && (
-            <span style={{ fontSize: 11, color: 'var(--accent)', marginLeft: 12 }}>
-              <span className="spinner" style={{ width: 10, height: 10, borderWidth: 2, marginRight: 4 }} />
-              Learning style rules from this label…
-            </span>
-          )}
-          {!learningRules && learnedCount !== null && (
-            <span style={{ fontSize: 11, color: learnedCount > 0 ? 'var(--accent)' : 'var(--text-3)', marginLeft: 12 }}>
-              {learnedCount > 0
-                ? `✨ ${learnedCount} new style rule${learnedCount !== 1 ? 's' : ''} learned → Style Guide`
-                : '◉ No new style rules extracted'}
-            </span>
-          )}
         </div>
       )}
 
@@ -293,7 +226,7 @@ export default function CheckDetail() {
 
         {/* Result header */}
         <div className="result-header">
-          <ScoreCircle score={check.score || 0} size={96} />
+          <SeverityBreakdown items={items} fallbackScore={check.score} />
           <div className="result-meta">
             <div className="result-product">{check.product_name}</div>
             <div style={{ display: 'flex', gap: 8, marginTop: 6, flexWrap: 'wrap', alignItems: 'center' }}>
@@ -371,7 +304,7 @@ export default function CheckDetail() {
                     <h3>❌ Failed ({failItems.length})</h3>
                     <div className="issue-list">
                       {failItems.map((item, i) => (
-                        <IssueCard key={i} item={item} markerNum={markerForIssue(i) ? i + 1 : null} />
+                        <ActionableIssueCard key={i} item={item} markerNum={markerForIssue(i) ? i + 1 : null} />
                       ))}
                     </div>
                   </div>
@@ -382,7 +315,7 @@ export default function CheckDetail() {
                     <div className="issue-list">
                       {warnItems.map((item, i) => {
                         const idx = failItems.length + i
-                        return <IssueCard key={i} item={item} markerNum={markerForIssue(idx) ? idx + 1 : null} />
+                        return <ActionableIssueCard key={i} item={item} markerNum={markerForIssue(idx) ? idx + 1 : null} />
                       })}
                     </div>
                   </div>
@@ -397,7 +330,7 @@ export default function CheckDetail() {
           <div className="issue-list">
             {passItems.length === 0
               ? <div className="empty-state"><p>No passed checks to display.</p></div>
-              : passItems.map((item, i) => <IssueCard key={i} item={item} />)
+              : passItems.map((item, i) => <ActionableIssueCard key={i} item={item} />)
             }
           </div>
         )}
@@ -650,29 +583,3 @@ export default function CheckDetail() {
   )
 }
 
-function IssueCard({ item, markerNum = null }) {
-  return (
-    <div className={`issue-card ${item.status}`}>
-      <div className="issue-header">
-        {markerNum !== null && (
-          <div
-            className="annotate-num"
-            style={{
-              background: item.status === 'FAIL' ? 'var(--fail)' : 'var(--warn)',
-              width: 20, height: 20, fontSize: 10, flexShrink: 0,
-            }}
-          >
-            {markerNum}
-          </div>
-        )}
-        <span className="issue-field">{item.field}</span>
-        {item.regulation && <span className="issue-reg">{item.regulation}</span>}
-      </div>
-      {item.found && item.status !== 'PASS' && (
-        <div className="issue-detail">Found: {item.found}</div>
-      )}
-      {item.issue && <div className="issue-detail" style={{ marginTop: 3 }}>{item.issue}</div>}
-      {item.recommendation && <div className="issue-rec">💡 {item.recommendation}</div>}
-    </div>
-  )
-}

@@ -14,7 +14,6 @@ import {
   DRUG_LOGO_TOGGLES,
   DRUG_LOGO_DEFAULTS,
 } from '../lib/regulations'
-import ScoreCircle from '../components/ScoreCircle'
 import VerdictBadge from '../components/VerdictBadge'
 import TrackBadge from '../components/TrackBadge'
 import CheckTypeBadge from '../components/CheckTypeBadge'
@@ -185,6 +184,14 @@ export default function NewCheck() {
         backPath = backUp?.path || null
       }
 
+      // Derive a legacy score from severity counts so Dashboard / History /
+      // ScoreCircle still show a meaningful number. New UI uses SeverityBreakdown.
+      const items       = result.items || []
+      const nBlockers   = items.filter(i => i.severity === 'blocker' || (!i.severity && i.status === 'FAIL')).length
+      const nMajors     = items.filter(i => i.severity === 'major').length
+      const nAdvisories = items.filter(i => i.severity === 'advisory' || (!i.severity && i.status === 'WARNING')).length
+      const derivedScore = Math.max(0, 100 - (nBlockers * 30 + nMajors * 10 + nAdvisories * 2))
+
       const { data: check, error: insErr } = await supabase.from('checks').insert({
         user_id:            user.id,
         product_name:       productName,
@@ -192,7 +199,7 @@ export default function NewCheck() {
         track,
         check_type:         checkType,
         verdict:            result.verdict,
-        score:              result.score,
+        score:              result.score ?? derivedScore,
         summary:            result.summary,
         report_json:        result.items || [],
         regulations_checked: Object.keys(regs).filter(k => regs[k]),
@@ -210,20 +217,8 @@ export default function NewCheck() {
 
       if (insErr) throw insErr
 
-      // Auto-save style suggestions
-      if (result.style_suggestions?.length && check) {
-        const rules = result.style_suggestions.map(s => ({
-          category: s.category || 'general',
-          title: s.title,
-          description: s.description,
-          source: 'auto-learned',
-          is_active: true,
-          created_by: user.id,
-          check_id: check.id,
-          project_id: projectId || null,
-        }))
-        await supabase.from('style_rules').insert(rules)
-      }
+      // (Style suggestions auto-save removed — was silently accumulating vague
+      // brand rules into every future prompt. Style Guide is now user-curated.)
 
       // ── Product memory update ────────────────────────────────────────
       if (projectId && result.items?.length) {
@@ -619,9 +614,9 @@ export default function NewCheck() {
 
           {result && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-              {/* Result header */}
+              {/* Result header — severity-weighted, not a single number */}
               <div className="result-header">
-                <ScoreCircle score={result.score || 0} size={96} />
+                <SeverityBreakdown items={allItems} fallbackScore={result.score} />
                 <div className="result-meta">
                   <div className="result-product">{productName}</div>
                   <div style={{ marginTop: 6, display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
@@ -711,21 +706,98 @@ export default function NewCheck() {
 }
 
 function IssueCard({ item }) {
+  return <ActionableIssueCard item={item} />
+}
+
+// Actionable card: shows exact fix text prominently, quote of what Claude saw,
+// regulation citation, and severity chip. Falls back to old fields for legacy checks.
+export function ActionableIssueCard({ item, markerNum = null }) {
+  const evidence      = item.evidence_quote || item.found        // legacy → found
+  const requiredText  = item.required_text  || ''
+  const placement     = item.required_placement || ''
+  const section       = item.regulation_section || ''
+  const severity      = item.severity || (item.status === 'FAIL' ? 'blocker' : item.status === 'WARNING' ? 'advisory' : null)
+
   return (
     <div className={`issue-card ${item.status}`}>
       <div className="issue-header">
+        {markerNum !== null && (
+          <div
+            className="annotate-num"
+            style={{
+              background: item.status === 'FAIL' ? 'var(--fail)' : 'var(--warn)',
+              width: 20, height: 20, fontSize: 10, flexShrink: 0,
+            }}
+          >
+            {markerNum}
+          </div>
+        )}
         <span className="issue-field">{item.field}</span>
-        {item.regulation && <span className="issue-reg">{item.regulation}</span>}
+        {severity && item.status !== 'PASS' && (
+          <span className={`sev-chip sev-${severity}`}>{severity.toUpperCase()}</span>
+        )}
+        {item.regulation && (
+          <span className="issue-reg">
+            {item.regulation}{section ? ` · ${section}` : ''}
+          </span>
+        )}
       </div>
-      {item.found && item.status !== 'PASS' && (
-        <div className="issue-detail">Found: {item.found}</div>
+
+      {evidence && (
+        <div className="issue-evidence">
+          <span className="issue-evidence-label">Claude saw:</span>
+          <span className="issue-evidence-text">{evidence}</span>
+        </div>
       )}
-      {item.issue && (
-        <div className="issue-detail" style={{ marginTop: 3 }}>{item.issue}</div>
+
+      {item.issue && item.status !== 'PASS' && (
+        <div className="issue-detail" style={{ marginTop: 6 }}>{item.issue}</div>
       )}
-      {item.recommendation && (
+
+      {requiredText && (
+        <div className="issue-fix">
+          <div className="issue-fix-label">
+            Add this to the label{placement ? ` — ${placement}` : ''}:
+          </div>
+          <pre className="issue-fix-text">{requiredText}</pre>
+          <button
+            className="issue-fix-copy"
+            onClick={() => navigator.clipboard?.writeText(requiredText)}
+            title="Copy fix text"
+          >
+            📋 Copy
+          </button>
+        </div>
+      )}
+
+      {item.recommendation && !requiredText && (
         <div className="issue-rec">💡 {item.recommendation}</div>
       )}
+    </div>
+  )
+}
+
+export function SeverityBreakdown({ items = [], fallbackScore = null }) {
+  const blockers   = items.filter(i => (i.severity === 'blocker')  || (!i.severity && i.status === 'FAIL')).length
+  const majors     = items.filter(i => (i.severity === 'major')).length
+  const advisories = items.filter(i => (i.severity === 'advisory') || (!i.severity && i.status === 'WARNING')).length
+  return (
+    <div className="severity-breakdown">
+      <div className={`sev-tile sev-blocker ${blockers > 0 ? 'active' : ''}`}>
+        <div className="sev-tile-num">{blockers}</div>
+        <div className="sev-tile-label">Blockers</div>
+        <div className="sev-tile-sub">cannot ship</div>
+      </div>
+      <div className={`sev-tile sev-major ${majors > 0 ? 'active' : ''}`}>
+        <div className="sev-tile-num">{majors}</div>
+        <div className="sev-tile-label">Majors</div>
+        <div className="sev-tile-sub">fix before print</div>
+      </div>
+      <div className={`sev-tile sev-advisory ${advisories > 0 ? 'active' : ''}`}>
+        <div className="sev-tile-num">{advisories}</div>
+        <div className="sev-tile-label">Advisories</div>
+        <div className="sev-tile-sub">review</div>
+      </div>
     </div>
   )
 }
