@@ -54,6 +54,14 @@ ALTER TABLE public.checks
 
 CREATE INDEX IF NOT EXISTS checks_batch_id_idx ON public.checks (batch_id);
 
+-- Store the full label text Claude transcribed so the ProjectDetail "Compare
+-- Versions → Artwork Diff" view can show a text diff between the approved
+-- artwork and the new upload. Also used by the deterministic post-checks.
+ALTER TABLE public.checks
+  ADD COLUMN IF NOT EXISTS extracted_text text;
+
+COMMENT ON COLUMN public.checks.extracted_text IS 'Full text as transcribed by Claude from the label image(s). Used for artwork text diff and deterministic post-checks.';
+
 -- RLS for check_batches (owner-only, same pattern as projects)
 ALTER TABLE public.check_batches ENABLE ROW LEVEL SECURITY;
 

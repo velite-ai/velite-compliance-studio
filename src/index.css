@@ -2229,3 +2229,59 @@ tr:hover td { background: var(--surface-2); }
   color: var(--text-3);
   font-style: italic;
 }
+
+/* ── ARTWORK DIFF ─────────────────────────────────────────────────────── */
+.artwork-pane-header {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .05em;
+  text-transform: uppercase;
+  padding: 6px 10px;
+  border-radius: 4px 4px 0 0;
+  color: #fff;
+}
+.artwork-tint-removed { background: #b91c1c; }
+.artwork-tint-added   { background: #047857; }
+
+.artwork-pane {
+  border: 1px solid var(--surface-3, #e5e7eb);
+  border-top: none;
+  border-radius: 0 0 4px 4px;
+  background: #fff;
+  padding: 8px;
+  max-height: 480px;
+  overflow: auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* ── TEXT DIFF ────────────────────────────────────────────────────────── */
+.text-diff {
+  font-family: 'SF Mono', Consolas, 'Roboto Mono', monospace;
+  font-size: 12px;
+  line-height: 1.55;
+  padding: 8px 0;
+  max-height: 480px;
+  overflow: auto;
+}
+.text-diff-line {
+  display: flex;
+  gap: 6px;
+  padding: 1px 12px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.diff-marker {
+  flex-shrink: 0;
+  width: 12px;
+  color: var(--text-3);
+  user-select: none;
+  text-align: center;
+  font-weight: 700;
+}
+.text-diff-line.diff-add    { background: #ecfdf5; color: #065f46; }
+.text-diff-line.diff-add    .diff-marker { color: #047857; }
+.text-diff-line.diff-remove { background: #fef2f2; color: #7f1d1d; text-decoration: line-through; text-decoration-color: rgba(0,0,0,.3); }
+.text-diff-line.diff-remove .diff-marker { color: #b91c1c; }
+.text-diff-line.diff-equal  { color: var(--text-3); }

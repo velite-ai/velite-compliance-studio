@@ -6,7 +6,7 @@ import VerdictBadge from '../components/VerdictBadge'
 import TrackBadge from '../components/TrackBadge'
 import CheckTypeBadge from '../components/CheckTypeBadge'
 import { format, parseISO } from 'date-fns'
-import { generateCompliancePDF, generateDesignerBriefPDF, generateAnnotatedJPEG } from '../lib/reports'
+import { generateCompliancePDF, generateDesignerBriefPDF, generateAnnotatedJPEG, generateAuditPDF } from '../lib/reports'
 import { ActionableIssueCard, SeverityBreakdown } from './NewCheck'
 
 export default function CheckDetail() {
@@ -193,6 +193,15 @@ export default function CheckDetail() {
       const doc = await generateDesignerBriefPDF(check)
       doc.save(`${check.product_name || 'designer'}-brief-${format(new Date(), 'yyyyMMdd')}.pdf`)
     } catch(e) { console.error(e) }
+    setGeneratingReport(null)
+  }
+
+  async function downloadAuditPDF() {
+    setGeneratingReport('audit')
+    try {
+      const doc = await generateAuditPDF(check)
+      doc.save(`${check.product_name || 'audit'}-locked-audit-${format(new Date(), 'yyyyMMdd')}.pdf`)
+    } catch (e) { console.error(e) }
     setGeneratingReport(null)
   }
 
@@ -566,6 +575,34 @@ export default function CheckDetail() {
                   {generatingReport === 'brief'
                     ? <><span className="spinner" /> Generating…</>
                     : '⬇ Download Brief'}
+                </button>
+              </div>
+
+              {/* Audit-trail PDF — only when fully signed off */}
+              <div className={`report-card${!check.is_fully_approved ? ' report-card-disabled' : ''}`}>
+                <div className="report-card-icon green">🔒</div>
+                <div className="report-card-content">
+                  <div className="report-card-title">Compliance Audit PDF</div>
+                  <div className="report-card-desc">
+                    {check.is_fully_approved
+                      ? 'Locked audit record with both signatures — for regulator submission or internal audit.'
+                      : 'Available once both Reviewer and QA have signed off above.'}
+                  </div>
+                  <ul className="report-card-includes">
+                    <li>Both signatures + frozen timestamps</li>
+                    <li>Every finding with evidence quote</li>
+                    <li>Regulation section citations</li>
+                    <li>Locked-record footer with generation stamp</li>
+                  </ul>
+                </div>
+                <button
+                  className="btn btn-primary"
+                  onClick={downloadAuditPDF}
+                  disabled={!check.is_fully_approved || generatingReport === 'audit'}
+                >
+                  {generatingReport === 'audit'
+                    ? <><span className="spinner" /> Generating…</>
+                    : '⬇ Download Audit PDF'}
                 </button>
               </div>
 

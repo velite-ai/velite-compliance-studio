@@ -666,3 +666,220 @@ export async function generateCOAPDF(batch, test, meta = {}) {
   addFooter(doc)
   return doc
 }
+
+// ── AUDIT-TRAIL PDF ──────────────────────────────────────────────────────
+/**
+ * Locked compliance audit record — for a fully signed-off check.
+ * Includes: header, product info, both signatures with timestamps,
+ * every finding with evidence quote + regulation section + required text,
+ * and a locked-record footer with a generation-time stamp.
+ *
+ * This is the PDF you present in an audit — it's the paper trail.
+ */
+export async function generateAuditPDF(check) {
+  const { default: jsPDF } = await import('jspdf')
+  const doc     = new jsPDF({ unit: 'mm', format: 'a4' })
+  const tColor  = trackColor(check.track)
+  const items   = check.report_json || []
+
+  // ── Header bar ──────────────────────────────────────────────────────────
+  doc.setFillColor(...tColor)
+  doc.rect(0, 0, W, 22, 'F')
+  doc.setTextColor(...C.white)
+  doc.setFontSize(15)
+  doc.setFont('helvetica', 'bold')
+  doc.text('COMPLIANCE AUDIT RECORD', M, 10)
+  doc.setFontSize(8)
+  doc.setFont('helvetica', 'normal')
+  doc.text('Velite Compliance Studio · Locked audit trail · Confidential', M, 16)
+
+  // Locked chip on the right of the header
+  doc.setFillColor(...C.white)
+  doc.roundedRect(W - M - 30, 5, 28, 12, 2, 2, 'F')
+  doc.setTextColor(...tColor)
+  doc.setFontSize(8)
+  doc.setFont('helvetica', 'bold')
+  doc.text('🔒  LOCKED', W - M - 16, 12, { align: 'center' })
+
+  let y = 30
+
+  // ── Product block ───────────────────────────────────────────────────────
+  doc.setTextColor(...C.dark)
+  doc.setFontSize(13)
+  doc.setFont('helvetica', 'bold')
+  doc.text(check.product_name || 'Untitled product', M, y)
+  y += 6
+
+  doc.setFontSize(9)
+  doc.setFont('helvetica', 'normal')
+  doc.setTextColor(...C.mid)
+  const metaLine = [
+    check.track === 'drug' ? 'Drug track' : 'Cosmetic track',
+    check.check_type === 'post-print' ? 'Post-print' : 'Pre-print',
+    check.product_category,
+    `Checked ${check.created_at ? new Date(check.created_at).toLocaleDateString('en-GB', { day:'2-digit', month:'short', year:'numeric' }) : '—'}`,
+  ].filter(Boolean).join('  ·  ')
+  doc.text(metaLine, M, y)
+  y += 4
+
+  // Verdict block
+  const b = items.filter(i => i.severity === 'blocker' || (!i.severity && i.status === 'FAIL')).length
+  const m_ = items.filter(i => i.severity === 'major').length
+  const a = items.filter(i => i.severity === 'advisory' || (!i.severity && i.status === 'WARNING')).length
+  y += 4
+  doc.setFillColor(...C.surface)
+  doc.roundedRect(M, y, CW, 14, 2, 2, 'F')
+  doc.setTextColor(...C.dark)
+  doc.setFontSize(8)
+  doc.setFont('helvetica', 'bold')
+  doc.text('VERDICT', M + 3, y + 5)
+  doc.setFont('helvetica', 'normal')
+  doc.setFontSize(10)
+  doc.setTextColor(...(check.verdict === 'PASS' ? C.pass : check.verdict === 'FAIL' ? C.red : C.warn))
+  doc.text(check.verdict || 'REVIEW REQUIRED', M + 3, y + 10.5)
+  doc.setTextColor(...C.mid)
+  doc.setFontSize(8)
+  doc.setFont('helvetica', 'normal')
+  doc.text(`${b} blocker${b !== 1 ? 's' : ''}  ·  ${m_} major${m_ !== 1 ? 's' : ''}  ·  ${a} advisor${a !== 1 ? 'ies' : 'y'}`, M + 60, y + 10.5)
+  y += 20
+
+  // ── Signature block ────────────────────────────────────────────────────
+  doc.setFillColor(...tColor)
+  doc.rect(M, y, CW, 6.5, 'F')
+  doc.setTextColor(...C.white)
+  doc.setFontSize(8)
+  doc.setFont('helvetica', 'bold')
+  doc.text('APPROVAL SIGNATURES', M + 2, y + 4.5)
+  y += 6.5
+
+  const sigColW = CW / 2 - 1
+  const sigH    = 22
+  // Reviewer
+  doc.setDrawColor(...C.gray)
+  doc.setLineWidth(0.3)
+  doc.rect(M, y, sigColW, sigH)
+  doc.setTextColor(...C.gray)
+  doc.setFontSize(7)
+  doc.setFont('helvetica', 'bold')
+  doc.text('REVIEWER · PACKAGING COMPLIANCE', M + 2, y + 4)
+  doc.setTextColor(...C.dark)
+  doc.setFontSize(10)
+  doc.setFont('helvetica', 'bold')
+  doc.text(check.reviewer_signed_name || '— not signed —', M + 2, y + 12)
+  doc.setTextColor(...C.mid)
+  doc.setFontSize(8)
+  doc.setFont('helvetica', 'normal')
+  doc.text(check.reviewer_signed_at ? new Date(check.reviewer_signed_at).toLocaleString('en-GB') : '', M + 2, y + 18)
+  // QA
+  doc.rect(M + sigColW + 2, y, sigColW, sigH)
+  doc.setTextColor(...C.gray)
+  doc.setFontSize(7)
+  doc.setFont('helvetica', 'bold')
+  doc.text('QA · QUALITY ASSURANCE', M + sigColW + 4, y + 4)
+  doc.setTextColor(...C.dark)
+  doc.setFontSize(10)
+  doc.setFont('helvetica', 'bold')
+  doc.text(check.qa_signed_name || '— not signed —', M + sigColW + 4, y + 12)
+  doc.setTextColor(...C.mid)
+  doc.setFontSize(8)
+  doc.setFont('helvetica', 'normal')
+  doc.text(check.qa_signed_at ? new Date(check.qa_signed_at).toLocaleString('en-GB') : '', M + sigColW + 4, y + 18)
+
+  y += sigH + 8
+
+  // ── Findings (audit-detailed) ──────────────────────────────────────────
+  if (items.length) {
+    doc.setFillColor(...tColor)
+    doc.rect(M, y, CW, 6.5, 'F')
+    doc.setTextColor(...C.white)
+    doc.setFontSize(8)
+    doc.setFont('helvetica', 'bold')
+    doc.text(`FINDINGS  (${items.length})`, M + 2, y + 4.5)
+    y += 8
+
+    items.forEach((item, idx) => {
+      const sev = item.severity || (item.status === 'FAIL' ? 'blocker' : item.status === 'WARNING' ? 'advisory' : null)
+      const sevColor = sev === 'blocker' ? C.red : sev === 'major' ? C.warn : sev === 'advisory' ? C.gray : C.pass
+      const fixText  = item.required_text || item.recommendation || ''
+      const evidence = item.evidence_quote || item.found || ''
+      const regStr   = [item.regulation, item.regulation_section].filter(Boolean).join(' · ')
+
+      const issueLines    = item.issue ? doc.splitTextToSize(item.issue,    CW - 8) : []
+      const evidenceLines = evidence   ? doc.splitTextToSize(`Seen: "${evidence}"`, CW - 8) : []
+      const fixLines      = fixText    ? doc.splitTextToSize(`Required: ${fixText}`,  CW - 8) : []
+      const rowH = 10 + (issueLines.length + evidenceLines.length + fixLines.length) * 3.5 + 4
+
+      y = cy(doc, y, rowH)
+      doc.setFillColor(...(idx % 2 === 0 ? C.white : C.surface))
+      doc.rect(M, y, CW, rowH, 'F')
+      // Left severity bar
+      doc.setFillColor(...sevColor)
+      doc.rect(M, y, 2, rowH, 'F')
+
+      // Field + severity chip
+      doc.setTextColor(...C.dark)
+      doc.setFontSize(9)
+      doc.setFont('helvetica', 'bold')
+      doc.text(item.field || '—', M + 5, y + 5)
+
+      if (sev) {
+        doc.setFillColor(...sevColor)
+        doc.roundedRect(W - M - 24, y + 1.8, 22, 4.5, 1, 1, 'F')
+        doc.setTextColor(...C.white)
+        doc.setFontSize(6)
+        doc.text(sev.toUpperCase(), W - M - 13, y + 4.8, { align: 'center' })
+      }
+
+      // Regulation + section
+      if (regStr) {
+        doc.setFontSize(7)
+        doc.setFont('helvetica', 'normal')
+        doc.setTextColor(...C.gray)
+        doc.text(regStr, M + 5, y + 9)
+      }
+
+      let iy = y + 12
+      if (issueLines.length) {
+        doc.setFontSize(7.5)
+        doc.setTextColor(...C.mid)
+        doc.setFont('helvetica', 'normal')
+        doc.text(issueLines, M + 5, iy)
+        iy += issueLines.length * 3.5
+      }
+      if (evidenceLines.length) {
+        doc.setFontSize(7)
+        doc.setTextColor(...C.gray)
+        doc.setFont('helvetica', 'italic')
+        doc.text(evidenceLines, M + 5, iy)
+        iy += evidenceLines.length * 3.5
+      }
+      if (fixLines.length) {
+        doc.setFontSize(7.5)
+        doc.setTextColor(...C.green)
+        doc.setFont('helvetica', 'bold')
+        doc.text(fixLines, M + 5, iy)
+      }
+      y += rowH + 1
+    })
+  }
+
+  // ── Locked-record footer ────────────────────────────────────────────────
+  y = cy(doc, y, 24)
+  y += 4
+  doc.setFillColor(240, 253, 244)
+  doc.setDrawColor(...C.green)
+  doc.setLineWidth(0.4)
+  doc.roundedRect(M, y, CW, 16, 2, 2, 'FD')
+  doc.setTextColor(...C.green)
+  doc.setFontSize(9)
+  doc.setFont('helvetica', 'bold')
+  doc.text('🔒  This is a locked compliance audit record.', M + 4, y + 6)
+  doc.setTextColor(...C.mid)
+  doc.setFontSize(7.5)
+  doc.setFont('helvetica', 'normal')
+  const genLine = `Both signatures on file. Fully approved on ${check.fully_approved_at ? new Date(check.fully_approved_at).toLocaleString('en-GB') : '—'}. PDF generated ${new Date().toLocaleString('en-GB')}. Record id: ${check.id || '—'}.`
+  doc.text(doc.splitTextToSize(genLine, CW - 8), M + 4, y + 11.5)
+
+  addFooter(doc)
+  return doc
+}

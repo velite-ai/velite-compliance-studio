@@ -175,6 +175,7 @@ export default function BatchCheck() {
           score:            r.score ?? derivedScore,
           summary:          r.summary,
           report_json:      items_,
+          extracted_text:   r.extracted_text || null,
           front_file_path:  up?.path,
           label_file_path:  up?.path,   // backward compat
           label_file_name:  it.file.name,

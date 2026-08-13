@@ -220,6 +220,7 @@ export default function NewCheck() {
         check_type:         checkType,
         verdict:            result.verdict,
         score:              result.score ?? derivedScore,
+        extracted_text:     result.extracted_text || null,
         summary:            result.summary,
         report_json:        result.items || [],
         regulations_checked: Object.keys(regs).filter(k => regs[k]),
