@@ -276,6 +276,7 @@ Return ONLY valid JSON matching this exact schema:
       "field": "<short label field name, e.g. 'MRP', 'Storage Instructions'>",
       "regulation": "<regulation name, e.g. 'Cosmetics Rules 2020'>",
       "regulation_section": "<specific section/rule/article number, e.g. 'Rule 45(f)' — or empty string if none>",
+      "source": "regulation" | "velite_internal",
       "status": "PASS" | "FAIL" | "WARNING",
       "severity": "blocker" | "major" | "advisory",
       "evidence_quote": "<the exact text or visual element you saw on the label that this finding refers to, verbatim in quotes — or 'Not present on label' if missing. Never invent; if you cannot cite, mark REVIEW.>",
@@ -299,7 +300,12 @@ VERDICT RULES:
 
 EVIDENCE RULE (critical): For every PASS/FAIL/WARNING you MUST quote what you actually saw on the label in "evidence_quote". If a required declaration is absent, quote "Not present on label". Never fabricate text. If you cannot clearly see the artwork, set status="WARNING" severity="advisory" and evidence_quote="Not clearly visible in image".
 
-DO NOT emit findings about font size in mm, area-percentage of a panel, or exact colour Pantone values — you cannot verify these from a scaleless image. Only flag typography where the text is CLEARLY too small to read in the image itself.`
+DO NOT emit findings about font size in mm, area-percentage of a panel, or exact colour Pantone values — you cannot verify these from a scaleless image. Only flag typography where the text is CLEARLY too small to read in the image itself.
+
+SOURCE RULES:
+- source="velite_internal" ONLY when the finding is driven by a rule that appears in the INTERNAL VELITE GUIDELINES section of this prompt (Velite's own SOPs / brand standards).
+- source="regulation" for everything else (Cosmetics Rules 2020, D&C Rules 1945, Legal Metrology, logo/mark checks).
+- When a finding is driven by BOTH a legal reg AND a Velite guideline, tag it "velite_internal" and cite the Velite SOP name in "regulation_section".`
 
 // ── CHECK TYPE SECTION BUILDER ────────────────────────────────────────────
 function buildCheckTypeSection(checkType) {

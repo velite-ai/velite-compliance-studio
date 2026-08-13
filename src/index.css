@@ -2285,3 +2285,24 @@ tr:hover td { background: var(--surface-2); }
 .text-diff-line.diff-remove { background: #fef2f2; color: #7f1d1d; text-decoration: line-through; text-decoration-color: rgba(0,0,0,.3); }
 .text-diff-line.diff-remove .diff-marker { color: #b91c1c; }
 .text-diff-line.diff-equal  { color: var(--text-3); }
+
+/* ── Source chips: distinguish regulator / Velite SOP / deterministic ── */
+.source-chip {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: .04em;
+  padding: 2px 7px;
+  border-radius: 4px;
+  flex-shrink: 0;
+  border: 1px solid transparent;
+}
+.source-chip.source-velite {
+  background: #eff6ff;
+  border-color: #bfdbfe;
+  color: #1e40af;
+}
+.source-chip.source-det {
+  background: #f3e8ff;
+  border-color: #d8b4fe;
+  color: #6b21a8;
+}

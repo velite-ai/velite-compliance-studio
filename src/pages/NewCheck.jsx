@@ -757,6 +757,12 @@ export function ActionableIssueCard({ item, markerNum = null }) {
         {severity && item.status !== 'PASS' && (
           <span className={`sev-chip sev-${severity}`}>{severity.toUpperCase()}</span>
         )}
+        {item.source === 'velite_internal' && (
+          <span className="source-chip source-velite" title="Driven by a Velite internal guideline">🏢 Velite SOP</span>
+        )}
+        {item.source === 'deterministic' && (
+          <span className="source-chip source-det" title="Deterministic rule (regex / lookup) — no AI">⚙️ Auto-check</span>
+        )}
         {item.regulation && (
           <span className="issue-reg">
             {item.regulation}{section ? ` · ${section}` : ''}

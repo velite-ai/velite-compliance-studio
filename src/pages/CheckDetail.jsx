@@ -7,6 +7,7 @@ import TrackBadge from '../components/TrackBadge'
 import CheckTypeBadge from '../components/CheckTypeBadge'
 import { format, parseISO } from 'date-fns'
 import { generateCompliancePDF, generateDesignerBriefPDF, generateAnnotatedJPEG, generateAuditPDF } from '../lib/reports'
+import { downloadFindingsCSV } from '../lib/csvExport'
 import { ActionableIssueCard, SeverityBreakdown } from './NewCheck'
 
 export default function CheckDetail() {
@@ -35,6 +36,10 @@ export default function CheckDetail() {
 
   // ── Reports state ──────────────────────────────────────────────────────
   const [generatingReport, setGeneratingReport] = useState(null) // 'compliance' | 'brief' | 'jpeg' | null
+
+  // ── Source filter for the Issues tab ──────────────────────────────────
+  // 'all' | 'regulation' | 'velite_internal' | 'deterministic'
+  const [sourceFilter, setSourceFilter] = useState('all')
 
   useEffect(() => { load() }, [id])
 
@@ -324,6 +329,13 @@ export default function CheckDetail() {
         {/* ── ISSUES TAB ── */}
         {activeTab === 'issues' && (
           <div>
+            {/* Source filter chips — see only Velite SOP violations, only regs, etc. */}
+            <SourceFilterBar
+              items={[...failItems, ...warnItems]}
+              current={sourceFilter}
+              onChange={setSourceFilter}
+            />
+
             {failItems.length === 0 && warnItems.length === 0 ? (
               <div className="empty-state">
                 <div className="empty-icon">🎉</div>
@@ -332,25 +344,31 @@ export default function CheckDetail() {
               </div>
             ) : (
               <>
-                {failItems.length > 0 && (
+                {failItems.filter(matchesSource(sourceFilter)).length > 0 && (
                   <div className="issues-section">
-                    <h3>❌ Failed ({failItems.length})</h3>
+                    <h3>❌ Failed ({failItems.filter(matchesSource(sourceFilter)).length})</h3>
                     <div className="issue-list">
-                      {failItems.map((item, i) => (
+                      {failItems.map((item, i) => matchesSource(sourceFilter)(item) && (
                         <ActionableIssueCard key={i} item={item} markerNum={markerForIssue(i) ? i + 1 : null} />
                       ))}
                     </div>
                   </div>
                 )}
-                {warnItems.length > 0 && (
+                {warnItems.filter(matchesSource(sourceFilter)).length > 0 && (
                   <div className="issues-section">
-                    <h3>⚠️ Warnings ({warnItems.length})</h3>
+                    <h3>⚠️ Warnings ({warnItems.filter(matchesSource(sourceFilter)).length})</h3>
                     <div className="issue-list">
                       {warnItems.map((item, i) => {
+                        if (!matchesSource(sourceFilter)(item)) return null
                         const idx = failItems.length + i
                         return <ActionableIssueCard key={i} item={item} markerNum={markerForIssue(idx) ? idx + 1 : null} />
                       })}
                     </div>
+                  </div>
+                )}
+                {(failItems.filter(matchesSource(sourceFilter)).length + warnItems.filter(matchesSource(sourceFilter)).length) === 0 && (
+                  <div className="empty-state">
+                    <p style={{ fontSize: 12, color: 'var(--text-3)' }}>No findings match the current filter.</p>
                   </div>
                 )}
               </>
@@ -606,6 +624,29 @@ export default function CheckDetail() {
                 </button>
               </div>
 
+              {/* Findings CSV — spreadsheet / email workflow */}
+              <div className="report-card">
+                <div className="report-card-icon amber">📊</div>
+                <div className="report-card-content">
+                  <div className="report-card-title">Findings CSV</div>
+                  <div className="report-card-desc">
+                    Every finding as one row — for spreadsheets, email to designer, or importing into a project tracker.
+                  </div>
+                  <ul className="report-card-includes">
+                    <li>Status, severity, source, regulation, section</li>
+                    <li>Evidence quote + required text + placement</li>
+                    <li>Header block with signoff status</li>
+                    <li>Excel-safe UTF-8 (₹ renders correctly)</li>
+                  </ul>
+                </div>
+                <button
+                  className="btn btn-primary"
+                  onClick={() => downloadFindingsCSV(check)}
+                >
+                  ⬇ Download CSV
+                </button>
+              </div>
+
               {/* Annotated JPEG */}
               <div className={`report-card${!frontUrl || markers.length === 0 ? ' report-card-disabled' : ''}`}>
                 <div className="report-card-icon purple">📍</div>
@@ -717,4 +758,41 @@ function SignoffPanel({ check, onSign, approving }) {
       )}
     </div>
   )
+}
+
+// Filter chip row for the Issues tab. Only renders chips that actually have
+// items behind them — so the row is empty on regulation-only checks.
+function SourceFilterBar({ items = [], current, onChange }) {
+  const counts = items.reduce((acc, it) => {
+    const s = it.source || 'regulation'
+    acc[s] = (acc[s] || 0) + 1
+    return acc
+  }, {})
+  const distinct = Object.keys(counts)
+  if (distinct.length < 2) return null   // no benefit in showing filter if all findings share a source
+
+  const chips = [
+    { key: 'all',             label: `All (${items.length})` },
+    { key: 'regulation',      label: `📋 Regulation (${counts.regulation || 0})` },
+    { key: 'velite_internal', label: `🏢 Velite SOP (${counts.velite_internal || 0})` },
+    { key: 'deterministic',   label: `⚙️ Auto-check (${counts.deterministic || 0})` },
+  ].filter(c => c.key === 'all' || (counts[c.key] || 0) > 0)
+
+  return (
+    <div style={{ display: 'flex', gap: 6, marginBottom: 14, flexWrap: 'wrap' }}>
+      {chips.map(c => (
+        <button
+          key={c.key}
+          className={`filter-chip${current === c.key ? ' active' : ''}`}
+          onClick={() => onChange(c.key)}
+        >
+          {c.label}
+        </button>
+      ))}
+    </div>
+  )
+}
+
+function matchesSource(filter) {
+  return (item) => filter === 'all' || (item.source || 'regulation') === filter
 }
