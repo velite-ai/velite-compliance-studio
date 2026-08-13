@@ -2002,3 +2002,307 @@ tr:hover td { background: var(--surface-2); }
 .guideline-toggle.on .guideline-toggle-knob {
   transform: translateX(16px);
 }
+
+/* ── ACTIONABLE FINDING CARDS (v2 schema) ─────────────────────────────── */
+
+/* Severity chip inline with field name */
+.sev-chip {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: .05em;
+  padding: 2px 7px;
+  border-radius: 4px;
+  text-transform: uppercase;
+  color: #fff;
+  flex-shrink: 0;
+}
+.sev-chip.sev-blocker  { background: #b91c1c; }
+.sev-chip.sev-major    { background: #b45309; }
+.sev-chip.sev-advisory { background: #6b7280; }
+
+/* "Claude saw:" evidence quote — proves the finding wasn't invented */
+.issue-evidence {
+  margin-top: 8px;
+  padding: 6px 10px;
+  background: rgba(0,0,0,.03);
+  border-left: 3px solid var(--surface-3);
+  border-radius: 3px;
+  font-size: 11px;
+  display: flex;
+  gap: 6px;
+  align-items: baseline;
+}
+.issue-evidence-label {
+  color: var(--text-3);
+  font-weight: 600;
+  flex-shrink: 0;
+}
+.issue-evidence-text {
+  color: var(--text-2);
+  font-style: italic;
+  word-break: break-word;
+}
+
+/* Copy-pasteable fix block — the main value change */
+.issue-fix {
+  margin-top: 10px;
+  padding: 10px 12px;
+  background: var(--accent-light, #ecfdf5);
+  border: 1px solid var(--accent-muted, #a7f3d0);
+  border-radius: 5px;
+  position: relative;
+}
+.issue-fix-label {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .05em;
+  text-transform: uppercase;
+  color: var(--accent-hover, #047857);
+  margin-bottom: 6px;
+}
+.issue-fix-text {
+  margin: 0;
+  padding: 0;
+  font-family: 'SF Mono', Consolas, 'Roboto Mono', monospace;
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--text);
+  white-space: pre-wrap;
+  word-break: break-word;
+  background: transparent;
+  border: none;
+}
+.issue-fix-copy {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  background: #fff;
+  border: 1px solid var(--accent-muted, #a7f3d0);
+  color: var(--accent-hover, #047857);
+  padding: 3px 8px;
+  border-radius: 3px;
+  font-size: 10px;
+  cursor: pointer;
+  font-weight: 600;
+}
+.issue-fix-copy:hover {
+  background: var(--accent-light, #ecfdf5);
+}
+
+/* Severity breakdown tiles — replaces the arbitrary score circle */
+.severity-breakdown {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(72px, 1fr));
+  gap: 6px;
+  flex-shrink: 0;
+  min-width: 260px;
+}
+.sev-tile {
+  padding: 10px 6px;
+  border-radius: 6px;
+  text-align: center;
+  border: 1px solid transparent;
+  background: var(--surface-2, #f9fafb);
+  opacity: .55;
+  transition: opacity .15s;
+}
+.sev-tile.active {
+  opacity: 1;
+}
+.sev-tile-num {
+  font-size: 22px;
+  font-weight: 700;
+  line-height: 1;
+}
+.sev-tile-label {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .05em;
+  text-transform: uppercase;
+  margin-top: 3px;
+}
+.sev-tile-sub {
+  font-size: 9px;
+  color: var(--text-3);
+  margin-top: 2px;
+}
+.sev-tile.sev-blocker.active  { background: #fef2f2; border-color: #fecaca; color: #b91c1c; }
+.sev-tile.sev-major.active    { background: #fffbeb; border-color: #fde68a; color: #b45309; }
+.sev-tile.sev-advisory.active { background: #f3f4f6; border-color: #d1d5db; color: #374151; }
+
+/* Sidebar: optional/advanced nav items — dimmer, with a "?" hint chip */
+.nav-item.nav-optional {
+  opacity: .6;
+}
+.nav-item.nav-optional:hover,
+.nav-item.nav-optional.active {
+  opacity: 1;
+}
+.nav-optional-badge {
+  margin-left: auto;
+  font-size: 9px;
+  font-weight: 700;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: rgba(255,255,255,.15);
+  color: rgba(255,255,255,.65);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: help;
+}
+
+/* ── 2-signature approval panel ───────────────────────────────────────── */
+.signoff-panel {
+  border: 1px solid var(--surface-3, #e5e7eb);
+  border-radius: 8px;
+  background: var(--surface-2, #f9fafb);
+  padding: 14px 16px;
+  margin-bottom: 20px;
+}
+.signoff-panel.locked {
+  border-color: var(--accent, #16a34a);
+  background: linear-gradient(180deg, #ecfdf5 0%, #f9fafb 60%);
+}
+.signoff-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+.signoff-title {
+  font-weight: 700;
+  font-size: 13px;
+  color: var(--text);
+}
+.signoff-panel.locked .signoff-title {
+  color: var(--accent-hover, #047857);
+}
+.signoff-progress {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-3);
+}
+.signoff-slots {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+.signoff-slot {
+  padding: 10px 12px;
+  border: 1px dashed var(--surface-3, #d1d5db);
+  border-radius: 6px;
+  background: #fff;
+  min-height: 76px;
+}
+.signoff-slot.signed {
+  border-style: solid;
+  border-color: var(--accent-muted, #a7f3d0);
+  background: var(--accent-light, #ecfdf5);
+}
+.signoff-slot-role {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .05em;
+  text-transform: uppercase;
+  color: var(--text-3);
+  margin-bottom: 4px;
+}
+.signoff-slot-name {
+  font-weight: 700;
+  font-size: 13px;
+  color: var(--accent-hover, #047857);
+  margin-top: 2px;
+}
+.signoff-slot-date {
+  font-size: 11px;
+  color: var(--text-3);
+  margin-top: 2px;
+}
+.signoff-locked-note {
+  margin-top: 10px;
+  padding: 6px 10px;
+  background: rgba(255,255,255,.6);
+  border-radius: 4px;
+  font-size: 11px;
+  color: var(--text-3);
+  font-style: italic;
+}
+
+/* ── ARTWORK DIFF ─────────────────────────────────────────────────────── */
+.artwork-pane-header {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .05em;
+  text-transform: uppercase;
+  padding: 6px 10px;
+  border-radius: 4px 4px 0 0;
+  color: #fff;
+}
+.artwork-tint-removed { background: #b91c1c; }
+.artwork-tint-added   { background: #047857; }
+
+.artwork-pane {
+  border: 1px solid var(--surface-3, #e5e7eb);
+  border-top: none;
+  border-radius: 0 0 4px 4px;
+  background: #fff;
+  padding: 8px;
+  max-height: 480px;
+  overflow: auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* ── TEXT DIFF ────────────────────────────────────────────────────────── */
+.text-diff {
+  font-family: 'SF Mono', Consolas, 'Roboto Mono', monospace;
+  font-size: 12px;
+  line-height: 1.55;
+  padding: 8px 0;
+  max-height: 480px;
+  overflow: auto;
+}
+.text-diff-line {
+  display: flex;
+  gap: 6px;
+  padding: 1px 12px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.diff-marker {
+  flex-shrink: 0;
+  width: 12px;
+  color: var(--text-3);
+  user-select: none;
+  text-align: center;
+  font-weight: 700;
+}
+.text-diff-line.diff-add    { background: #ecfdf5; color: #065f46; }
+.text-diff-line.diff-add    .diff-marker { color: #047857; }
+.text-diff-line.diff-remove { background: #fef2f2; color: #7f1d1d; text-decoration: line-through; text-decoration-color: rgba(0,0,0,.3); }
+.text-diff-line.diff-remove .diff-marker { color: #b91c1c; }
+.text-diff-line.diff-equal  { color: var(--text-3); }
+
+/* ── Source chips: distinguish regulator / Velite SOP / deterministic ── */
+.source-chip {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: .04em;
+  padding: 2px 7px;
+  border-radius: 4px;
+  flex-shrink: 0;
+  border: 1px solid transparent;
+}
+.source-chip.source-velite {
+  background: #eff6ff;
+  border-color: #bfdbfe;
+  color: #1e40af;
+}
+.source-chip.source-det {
+  background: #f3e8ff;
+  border-color: #d8b4fe;
+  color: #6b21a8;
+}

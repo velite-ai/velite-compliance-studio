@@ -2,13 +2,13 @@ import { useEffect, useRef, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
-import ScoreCircle from '../components/ScoreCircle'
 import VerdictBadge from '../components/VerdictBadge'
 import TrackBadge from '../components/TrackBadge'
 import CheckTypeBadge from '../components/CheckTypeBadge'
 import { format, parseISO } from 'date-fns'
-import { generateCompliancePDF, generateDesignerBriefPDF, generateAnnotatedJPEG } from '../lib/reports'
-import { learnStyleRulesFromLabel } from '../lib/anthropic'
+import { generateCompliancePDF, generateDesignerBriefPDF, generateAnnotatedJPEG, generateAuditPDF } from '../lib/reports'
+import { downloadFindingsCSV } from '../lib/csvExport'
+import { ActionableIssueCard, SeverityBreakdown } from './NewCheck'
 
 export default function CheckDetail() {
   const { id } = useParams()
@@ -37,9 +37,9 @@ export default function CheckDetail() {
   // ── Reports state ──────────────────────────────────────────────────────
   const [generatingReport, setGeneratingReport] = useState(null) // 'compliance' | 'brief' | 'jpeg' | null
 
-  // ── Auto-learn state ──────────────────────────────────────────────────
-  const [learningRules, setLearningRules] = useState(false)
-  const [learnedCount,  setLearnedCount]  = useState(null) // number | null
+  // ── Source filter for the Issues tab ──────────────────────────────────
+  // 'all' | 'regulation' | 'velite_internal' | 'deterministic'
+  const [sourceFilter, setSourceFilter] = useState('all')
 
   useEffect(() => { load() }, [id])
 
@@ -68,67 +68,51 @@ export default function CheckDetail() {
     setLoading(false)
   }
 
-  async function approve() {
+  // ── 2-signature approval ──────────────────────────────────────────────
+  // Reviewer signs first, then QA signs. Once both are signed the record
+  // is fully approved (is_fully_approved=true) and treated as locked in the
+  // audit trail. Same user can technically sign both slots (small team) —
+  // but each signature is a distinct explicit action with its own timestamp.
+  async function signAs(role) {
+    if (!user) return
+    const now      = new Date().toISOString()
+    const signerName = user.profile?.full_name || user.email || 'Unknown'
+
+    // Fetch the display name for the audit trail (frozen at sign time)
+    let displayName = signerName
+    try {
+      const { data: prof } = await supabase.from('profiles').select('full_name').eq('id', user.id).single()
+      if (prof?.full_name) displayName = prof.full_name
+    } catch { /* fall back to email */ }
+
+    if (!confirm(
+      role === 'reviewer'
+        ? `Sign this report as REVIEWER (Packaging Compliance)?\n\nName recorded: ${displayName}\nDate: ${format(new Date(), 'dd MMM yyyy HH:mm')}\n\nThis signature is part of the permanent audit trail.`
+        : `Sign this report as QA (Quality Assurance)?\n\nName recorded: ${displayName}\nDate: ${format(new Date(), 'dd MMM yyyy HH:mm')}\n\nOnce QA signs, this record will be fully approved and locked from further edits.`
+    )) return
+
     setApproving(true)
-    await supabase.from('checks').update({
-      is_approved: true,
-      approved_at: new Date().toISOString(),
-      approved_by: user.id,
-    }).eq('id', id)
-    setCheck(c => ({ ...c, is_approved: true, approved_at: new Date().toISOString() }))
-    setApproving(false)
+    const patch = role === 'reviewer'
+      ? { reviewer_signed_by: user.id, reviewer_signed_at: now, reviewer_signed_name: displayName }
+      : { qa_signed_by: user.id, qa_signed_at: now, qa_signed_name: displayName }
 
-    // 7B: Auto-learn style rules from the approved label image
-    if (frontUrl) {
-      setLearningRules(true)
-      try {
-        const { base64, mimeType } = await urlToBase64(frontUrl)
-        // Fetch existing rule titles to avoid duplicates
-        const { data: existingRules } = await supabase
-          .from('style_rules').select('title').eq('is_active', true)
-        const existingTitles = (existingRules || []).map(r => r.title)
+    // If this signature completes the pair, flip the fully-approved flags
+    const willBeFullyApproved =
+      (role === 'reviewer' && check?.qa_signed_at)   ||
+      (role === 'qa'       && check?.reviewer_signed_at)
 
-        const { rules } = await learnStyleRulesFromLabel({
-          check,
-          base64,
-          mimeType,
-          existingRuleTitles: existingTitles,
-        })
-
-        if (rules?.length) {
-          await supabase.from('style_rules').insert(rules.map(r => ({
-            category:          r.category || 'general',
-            title:             r.title,
-            description:       r.description,
-            example_correct:   r.example_correct || null,
-            example_incorrect: r.example_incorrect || null,
-            source:            'auto-learned',
-            is_active:         true,
-            created_by:        user?.id,
-            check_id:          id,
-            project_id:        check.project_id || null,
-          })))
-          setLearnedCount(rules.length)
-        } else {
-          setLearnedCount(0)
-        }
-      } catch (e) {
-        console.error('Auto-learn failed:', e)
-        setLearnedCount(0)
-      }
-      setLearningRules(false)
+    if (willBeFullyApproved) {
+      patch.is_fully_approved = true
+      patch.fully_approved_at = now
+      // Keep the legacy is_approved flag in sync for old dashboards
+      patch.is_approved = true
+      patch.approved_at = now
+      patch.approved_by = user.id
     }
-  }
 
-  async function urlToBase64(url) {
-    const res  = await fetch(url)
-    const blob = await res.blob()
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader()
-      reader.onload  = () => resolve({ base64: reader.result.split(',')[1], mimeType: blob.type })
-      reader.onerror = reject
-      reader.readAsDataURL(blob)
-    })
+    await supabase.from('checks').update(patch).eq('id', id)
+    setCheck(c => ({ ...c, ...patch }))
+    setApproving(false)
   }
 
   async function saveNotes() {
@@ -217,6 +201,15 @@ export default function CheckDetail() {
     setGeneratingReport(null)
   }
 
+  async function downloadAuditPDF() {
+    setGeneratingReport('audit')
+    try {
+      const doc = await generateAuditPDF(check)
+      doc.save(`${check.product_name || 'audit'}-locked-audit-${format(new Date(), 'yyyyMMdd')}.pdf`)
+    } catch (e) { console.error(e) }
+    setGeneratingReport(null)
+  }
+
   async function downloadAnnotatedJPEG() {
     if (!frontUrl || markers.length === 0) return
     setGeneratingReport('jpeg')
@@ -260,40 +253,18 @@ export default function CheckDetail() {
       <div style={{ display: 'flex', gap: 12, marginBottom: 20 }}>
         <button className="btn btn-ghost btn-sm" onClick={() => navigate(-1)}>← Back</button>
         <div style={{ flex: 1 }} />
-        {!check.is_approved && (
-          <button className="btn btn-success" onClick={approve} disabled={approving}>
-            {approving ? <><span className="spinner" /> Approving…</> : '✓ Approve Label'}
-          </button>
-        )}
         <button className="btn btn-primary" onClick={exportPDF}>⬇ Export PDF</button>
       </div>
 
-      {check.is_approved && (
-        <div className="approved-banner">
-          ✓ Approved on {check.approved_at ? format(parseISO(check.approved_at), 'dd MMM yyyy') : ''}
-          {check.notes && <span style={{ fontSize: 11, color: 'var(--pass)', marginLeft: 8 }}>· Notes saved</span>}
-          {learningRules && (
-            <span style={{ fontSize: 11, color: 'var(--accent)', marginLeft: 12 }}>
-              <span className="spinner" style={{ width: 10, height: 10, borderWidth: 2, marginRight: 4 }} />
-              Learning style rules from this label…
-            </span>
-          )}
-          {!learningRules && learnedCount !== null && (
-            <span style={{ fontSize: 11, color: learnedCount > 0 ? 'var(--accent)' : 'var(--text-3)', marginLeft: 12 }}>
-              {learnedCount > 0
-                ? `✨ ${learnedCount} new style rule${learnedCount !== 1 ? 's' : ''} learned → Style Guide`
-                : '◉ No new style rules extracted'}
-            </span>
-          )}
-        </div>
-      )}
+      {/* 2-signature approval widget */}
+      <SignoffPanel check={check} onSign={signAs} approving={approving} />
 
       {/* Printable area */}
       <div ref={reportRef} id="pdf-report">
 
         {/* Result header */}
         <div className="result-header">
-          <ScoreCircle score={check.score || 0} size={96} />
+          <SeverityBreakdown items={items} fallbackScore={check.score} />
           <div className="result-meta">
             <div className="result-product">{check.product_name}</div>
             <div style={{ display: 'flex', gap: 8, marginTop: 6, flexWrap: 'wrap', alignItems: 'center' }}>
@@ -358,6 +329,13 @@ export default function CheckDetail() {
         {/* ── ISSUES TAB ── */}
         {activeTab === 'issues' && (
           <div>
+            {/* Source filter chips — see only Velite SOP violations, only regs, etc. */}
+            <SourceFilterBar
+              items={[...failItems, ...warnItems]}
+              current={sourceFilter}
+              onChange={setSourceFilter}
+            />
+
             {failItems.length === 0 && warnItems.length === 0 ? (
               <div className="empty-state">
                 <div className="empty-icon">🎉</div>
@@ -366,25 +344,31 @@ export default function CheckDetail() {
               </div>
             ) : (
               <>
-                {failItems.length > 0 && (
+                {failItems.filter(matchesSource(sourceFilter)).length > 0 && (
                   <div className="issues-section">
-                    <h3>❌ Failed ({failItems.length})</h3>
+                    <h3>❌ Failed ({failItems.filter(matchesSource(sourceFilter)).length})</h3>
                     <div className="issue-list">
-                      {failItems.map((item, i) => (
-                        <IssueCard key={i} item={item} markerNum={markerForIssue(i) ? i + 1 : null} />
+                      {failItems.map((item, i) => matchesSource(sourceFilter)(item) && (
+                        <ActionableIssueCard key={i} item={item} markerNum={markerForIssue(i) ? i + 1 : null} />
                       ))}
                     </div>
                   </div>
                 )}
-                {warnItems.length > 0 && (
+                {warnItems.filter(matchesSource(sourceFilter)).length > 0 && (
                   <div className="issues-section">
-                    <h3>⚠️ Warnings ({warnItems.length})</h3>
+                    <h3>⚠️ Warnings ({warnItems.filter(matchesSource(sourceFilter)).length})</h3>
                     <div className="issue-list">
                       {warnItems.map((item, i) => {
+                        if (!matchesSource(sourceFilter)(item)) return null
                         const idx = failItems.length + i
-                        return <IssueCard key={i} item={item} markerNum={markerForIssue(idx) ? idx + 1 : null} />
+                        return <ActionableIssueCard key={i} item={item} markerNum={markerForIssue(idx) ? idx + 1 : null} />
                       })}
                     </div>
+                  </div>
+                )}
+                {(failItems.filter(matchesSource(sourceFilter)).length + warnItems.filter(matchesSource(sourceFilter)).length) === 0 && (
+                  <div className="empty-state">
+                    <p style={{ fontSize: 12, color: 'var(--text-3)' }}>No findings match the current filter.</p>
                   </div>
                 )}
               </>
@@ -397,7 +381,7 @@ export default function CheckDetail() {
           <div className="issue-list">
             {passItems.length === 0
               ? <div className="empty-state"><p>No passed checks to display.</p></div>
-              : passItems.map((item, i) => <IssueCard key={i} item={item} />)
+              : passItems.map((item, i) => <ActionableIssueCard key={i} item={item} />)
             }
           </div>
         )}
@@ -612,6 +596,57 @@ export default function CheckDetail() {
                 </button>
               </div>
 
+              {/* Audit-trail PDF — only when fully signed off */}
+              <div className={`report-card${!check.is_fully_approved ? ' report-card-disabled' : ''}`}>
+                <div className="report-card-icon green">🔒</div>
+                <div className="report-card-content">
+                  <div className="report-card-title">Compliance Audit PDF</div>
+                  <div className="report-card-desc">
+                    {check.is_fully_approved
+                      ? 'Locked audit record with both signatures — for regulator submission or internal audit.'
+                      : 'Available once both Reviewer and QA have signed off above.'}
+                  </div>
+                  <ul className="report-card-includes">
+                    <li>Both signatures + frozen timestamps</li>
+                    <li>Every finding with evidence quote</li>
+                    <li>Regulation section citations</li>
+                    <li>Locked-record footer with generation stamp</li>
+                  </ul>
+                </div>
+                <button
+                  className="btn btn-primary"
+                  onClick={downloadAuditPDF}
+                  disabled={!check.is_fully_approved || generatingReport === 'audit'}
+                >
+                  {generatingReport === 'audit'
+                    ? <><span className="spinner" /> Generating…</>
+                    : '⬇ Download Audit PDF'}
+                </button>
+              </div>
+
+              {/* Findings CSV — spreadsheet / email workflow */}
+              <div className="report-card">
+                <div className="report-card-icon amber">📊</div>
+                <div className="report-card-content">
+                  <div className="report-card-title">Findings CSV</div>
+                  <div className="report-card-desc">
+                    Every finding as one row — for spreadsheets, email to designer, or importing into a project tracker.
+                  </div>
+                  <ul className="report-card-includes">
+                    <li>Status, severity, source, regulation, section</li>
+                    <li>Evidence quote + required text + placement</li>
+                    <li>Header block with signoff status</li>
+                    <li>Excel-safe UTF-8 (₹ renders correctly)</li>
+                  </ul>
+                </div>
+                <button
+                  className="btn btn-primary"
+                  onClick={() => downloadFindingsCSV(check)}
+                >
+                  ⬇ Download CSV
+                </button>
+              </div>
+
               {/* Annotated JPEG */}
               <div className={`report-card${!frontUrl || markers.length === 0 ? ' report-card-disabled' : ''}`}>
                 <div className="report-card-icon purple">📍</div>
@@ -650,29 +685,114 @@ export default function CheckDetail() {
   )
 }
 
-function IssueCard({ item, markerNum = null }) {
+// 2-signature approval widget: Reviewer + QA. Once both signed, the record
+// is locked (is_fully_approved=true) and shown as an immutable audit trail.
+function SignoffPanel({ check, onSign, approving }) {
+  const rSigned = !!check.reviewer_signed_at
+  const qSigned = !!check.qa_signed_at
+  const locked  = !!check.is_fully_approved
+
   return (
-    <div className={`issue-card ${item.status}`}>
-      <div className="issue-header">
-        {markerNum !== null && (
-          <div
-            className="annotate-num"
-            style={{
-              background: item.status === 'FAIL' ? 'var(--fail)' : 'var(--warn)',
-              width: 20, height: 20, fontSize: 10, flexShrink: 0,
-            }}
-          >
-            {markerNum}
-          </div>
-        )}
-        <span className="issue-field">{item.field}</span>
-        {item.regulation && <span className="issue-reg">{item.regulation}</span>}
+    <div className={`signoff-panel ${locked ? 'locked' : ''}`}>
+      <div className="signoff-header">
+        <span className="signoff-title">
+          {locked ? '🔒 Fully Approved — Audit Trail Locked' : '✍️ Approval — 2 Signatures Required'}
+        </span>
+        <span className="signoff-progress">
+          {(rSigned ? 1 : 0) + (qSigned ? 1 : 0)} / 2 signed
+        </span>
       </div>
-      {item.found && item.status !== 'PASS' && (
-        <div className="issue-detail">Found: {item.found}</div>
+
+      <div className="signoff-slots">
+        {/* Reviewer slot */}
+        <div className={`signoff-slot ${rSigned ? 'signed' : ''}`}>
+          <div className="signoff-slot-role">Reviewer · Packaging Compliance</div>
+          {rSigned ? (
+            <>
+              <div className="signoff-slot-name">✓ {check.reviewer_signed_name || 'Unknown'}</div>
+              <div className="signoff-slot-date">
+                {format(parseISO(check.reviewer_signed_at), 'dd MMM yyyy · HH:mm')}
+              </div>
+            </>
+          ) : (
+            <button
+              className="btn btn-primary btn-sm"
+              onClick={() => onSign('reviewer')}
+              disabled={approving}
+              style={{ marginTop: 6 }}
+            >
+              {approving ? <><span className="spinner" /> …</> : 'Sign as Reviewer'}
+            </button>
+          )}
+        </div>
+
+        {/* QA slot */}
+        <div className={`signoff-slot ${qSigned ? 'signed' : ''}`}>
+          <div className="signoff-slot-role">QA · Quality Assurance</div>
+          {qSigned ? (
+            <>
+              <div className="signoff-slot-name">✓ {check.qa_signed_name || 'Unknown'}</div>
+              <div className="signoff-slot-date">
+                {format(parseISO(check.qa_signed_at), 'dd MMM yyyy · HH:mm')}
+              </div>
+            </>
+          ) : (
+            <button
+              className="btn btn-success btn-sm"
+              onClick={() => onSign('qa')}
+              disabled={approving || !rSigned}
+              title={!rSigned ? 'Reviewer must sign first' : ''}
+              style={{ marginTop: 6 }}
+            >
+              {approving ? <><span className="spinner" /> …</> : 'Sign as QA'}
+            </button>
+          )}
+        </div>
+      </div>
+
+      {locked && (
+        <div className="signoff-locked-note">
+          This record is part of the compliance audit trail. Approved on{' '}
+          {check.fully_approved_at ? format(parseISO(check.fully_approved_at), 'dd MMM yyyy') : ''}.
+        </div>
       )}
-      {item.issue && <div className="issue-detail" style={{ marginTop: 3 }}>{item.issue}</div>}
-      {item.recommendation && <div className="issue-rec">💡 {item.recommendation}</div>}
     </div>
   )
+}
+
+// Filter chip row for the Issues tab. Only renders chips that actually have
+// items behind them — so the row is empty on regulation-only checks.
+function SourceFilterBar({ items = [], current, onChange }) {
+  const counts = items.reduce((acc, it) => {
+    const s = it.source || 'regulation'
+    acc[s] = (acc[s] || 0) + 1
+    return acc
+  }, {})
+  const distinct = Object.keys(counts)
+  if (distinct.length < 2) return null   // no benefit in showing filter if all findings share a source
+
+  const chips = [
+    { key: 'all',             label: `All (${items.length})` },
+    { key: 'regulation',      label: `📋 Regulation (${counts.regulation || 0})` },
+    { key: 'velite_internal', label: `🏢 Velite SOP (${counts.velite_internal || 0})` },
+    { key: 'deterministic',   label: `⚙️ Auto-check (${counts.deterministic || 0})` },
+  ].filter(c => c.key === 'all' || (counts[c.key] || 0) > 0)
+
+  return (
+    <div style={{ display: 'flex', gap: 6, marginBottom: 14, flexWrap: 'wrap' }}>
+      {chips.map(c => (
+        <button
+          key={c.key}
+          className={`filter-chip${current === c.key ? ' active' : ''}`}
+          onClick={() => onChange(c.key)}
+        >
+          {c.label}
+        </button>
+      ))}
+    </div>
+  )
+}
+
+function matchesSource(filter) {
+  return (item) => filter === 'all' || (item.source || 'regulation') === filter
 }

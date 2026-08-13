@@ -6,6 +6,7 @@ import TrackBadge from '../components/TrackBadge'
 import VerdictBadge from '../components/VerdictBadge'
 import ScoreCircle from '../components/ScoreCircle'
 import { format, parseISO } from 'date-fns'
+import { diffLines, diffSummary } from '../lib/textDiff'
 
 const PKG_ICONS = { carton:'📦', label:'🏷️', tube:'🧴', insert:'📄', other:'📋' }
 
@@ -24,6 +25,7 @@ export default function ProjectDetail() {
   const [compareA, setCompareA] = useState(null)
   const [compareB, setCompareB] = useState(null)
   const [showCompare, setShowCompare] = useState(false)
+  const [compareView, setCompareView] = useState('findings')   // 'findings' | 'artwork'
 
   // Edit project inline
   const [editMode, setEditMode] = useState(false)
@@ -285,15 +287,38 @@ export default function ProjectDetail() {
               </div>
 
               {compareA && compareB && (
-                diff.length === 0 ? (
-                  <div className="card">
-                    <div className="empty-state">
-                      <div className="empty-icon">✅</div>
-                      <h3>No differences found</h3>
-                      <p>All checked fields have the same status in both versions.</p>
-                    </div>
+                <div>
+                  {/* Sub-tab toggle: Findings diff (existing) vs Artwork diff (new) */}
+                  <div className="tabs" style={{ marginBottom: 12 }}>
+                    <button
+                      className={`tab-btn${compareView === 'findings' ? ' active' : ''}`}
+                      onClick={() => setCompareView('findings')}
+                    >
+                      Findings Diff ({diff.length})
+                    </button>
+                    <button
+                      className={`tab-btn${compareView === 'artwork' ? ' active' : ''}`}
+                      onClick={() => setCompareView('artwork')}
+                    >
+                      📐 Artwork Diff
+                    </button>
                   </div>
-                ) : (
+
+                  {compareView === 'artwork' && (
+                    <ArtworkDiff a={compareA.checks} b={compareB.checks}
+                                 verA={compareA.version_number} verB={compareB.version_number} />
+                  )}
+
+                  {compareView === 'findings' && (
+                    diff.length === 0 ? (
+                      <div className="card">
+                        <div className="empty-state">
+                          <div className="empty-icon">✅</div>
+                          <h3>No differences in findings</h3>
+                          <p>All checked fields have the same status in both versions. Try the Artwork Diff tab to spot text changes on the label itself.</p>
+                        </div>
+                      </div>
+                    ) : (
                   <div className="compare-panel">
                     <div className="compare-col">
                       <div className="compare-col-header">
@@ -352,7 +377,9 @@ export default function ProjectDetail() {
                       ))}
                     </div>
                   </div>
-                )
+                    )
+                  )}
+                </div>
               )}
             </div>
           )}
@@ -794,4 +821,131 @@ function VersionRow({ version: v, onMarkFinal }) {
       </div>
     </div>
   )
+}
+
+// ── ARTWORK DIFF ──────────────────────────────────────────────────────────
+// Compares two versions of the SAME product: side-by-side label images plus
+// a line-level text diff. Catches "MRP dropped a decimal", "batch box moved",
+// "warning text changed" — the failure modes the Findings diff can't see
+// because both versions might still be flagged with the same finding statuses.
+function ArtworkDiff({ a, b, verA, verB }) {
+  const [urlA, setUrlA] = useState(null)
+  const [urlB, setUrlB] = useState(null)
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    let cancelled = false
+    async function loadUrls() {
+      setLoading(true)
+      const [uA, uB] = await Promise.all([
+        signedUrlFor(a?.front_file_path || a?.label_file_path),
+        signedUrlFor(b?.front_file_path || b?.label_file_path),
+      ])
+      if (!cancelled) { setUrlA(uA); setUrlB(uB); setLoading(false) }
+    }
+    loadUrls()
+    return () => { cancelled = true }
+  }, [a?.id, b?.id])
+
+  const textA = a?.extracted_text || evidenceFromItems(a?.report_json)
+  const textB = b?.extracted_text || evidenceFromItems(b?.report_json)
+  const diff  = diffLines(textA, textB)
+  const summ  = diffSummary(diff)
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+      {/* Side-by-side image comparison */}
+      <div className="card">
+        <div className="card-header">
+          <span className="card-title">Label Artwork — side by side</span>
+          <span style={{ fontSize: 11, color: 'var(--text-3)' }}>
+            v{verA} → v{verB}
+          </span>
+        </div>
+        <div className="card-body" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+          <ArtworkPane label={`v${verA} (older)`} url={urlA} loading={loading} tint="removed" />
+          <ArtworkPane label={`v${verB} (newer)`} url={urlB} loading={loading} tint="added" />
+        </div>
+      </div>
+
+      {/* Text diff */}
+      <div className="card">
+        <div className="card-header">
+          <span className="card-title">Text Diff</span>
+          {(textA || textB) ? (
+            <span style={{ fontSize: 11, color: 'var(--text-3)' }}>
+              <span style={{ color: '#b91c1c', fontWeight: 700 }}>− {summ.removed}</span>{'  '}
+              <span style={{ color: '#047857', fontWeight: 700 }}>+ {summ.added}</span>{'  '}
+              <span style={{ color: 'var(--text-3)' }}>· {summ.unchanged} unchanged</span>
+            </span>
+          ) : (
+            <span style={{ fontSize: 11, color: 'var(--text-3)' }}>No transcribed text available</span>
+          )}
+        </div>
+        <div className="card-body" style={{ padding: 0 }}>
+          {!textA && !textB ? (
+            <div className="empty-state" style={{ padding: 24 }}>
+              <p style={{ fontSize: 12, color: 'var(--text-3)' }}>
+                One or both versions were checked before extracted-text capture. Re-run the check on the affected version to enable text diff.
+              </p>
+            </div>
+          ) : summ.changed === 0 ? (
+            <div className="empty-state" style={{ padding: 24 }}>
+              <div className="empty-icon">✅</div>
+              <p>No text changes detected between the two label versions.</p>
+            </div>
+          ) : (
+            <div className="text-diff">
+              {diff.map((d, i) => (
+                <div key={i} className={`text-diff-line diff-${d.kind}`}>
+                  <span className="diff-marker">
+                    {d.kind === 'add' ? '+' : d.kind === 'remove' ? '−' : ' '}
+                  </span>
+                  <span className="diff-text">{d.line || ' '}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function ArtworkPane({ label, url, loading, tint }) {
+  return (
+    <div>
+      <div className={`artwork-pane-header artwork-tint-${tint}`}>{label}</div>
+      <div className="artwork-pane">
+        {loading
+          ? <div className="empty-state" style={{ padding: 24 }}><span className="spinner" /></div>
+          : url
+            ? <img src={url} alt={label} style={{ maxWidth: '100%', display: 'block', margin: '0 auto' }} />
+            : <div className="empty-state" style={{ padding: 24 }}>
+                <p style={{ fontSize: 11, color: 'var(--text-3)' }}>Image not available (was uploaded before signed-URL rotation, or storage bucket policy blocks access).</p>
+              </div>
+        }
+      </div>
+    </div>
+  )
+}
+
+async function signedUrlFor(path) {
+  if (!path) return null
+  const { data } = await supabase.storage.from('labels').createSignedUrl(path, 3600)
+  return data?.signedUrl || null
+}
+
+// Fallback: reconstruct a rough text corpus from evidence quotes on findings.
+// Used only for checks stored before the extracted_text column existed.
+function evidenceFromItems(items = []) {
+  if (!Array.isArray(items) || !items.length) return ''
+  return items
+    .map(it => {
+      const q = it.evidence_quote || it.found || ''
+      if (!q || q === 'Not present on label') return ''
+      return `${it.field || '—'}: ${q}`
+    })
+    .filter(Boolean)
+    .join('\n')
 }

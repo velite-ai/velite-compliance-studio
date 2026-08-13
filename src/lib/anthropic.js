@@ -79,9 +79,14 @@ export async function analyseLabel({
       'anthropic-dangerous-direct-browser-access': 'true',
     },
     body: JSON.stringify({
-      model: 'claude-opus-4-5',
+      model: MODEL_ANALYSE,
       max_tokens: 4096,
-      system: systemPrompt,
+      // Prompt caching on the shared regulatory system prompt.
+      // Anthropic caches the block for ~5 min, so a burst of checks in one
+      // session pays for the big regulatory context once, not per check.
+      system: [
+        { type: 'text', text: systemPrompt, cache_control: { type: 'ephemeral' } },
+      ],
       messages: [{ role: 'user', content: userContent }],
     }),
   })
@@ -98,6 +103,11 @@ export async function analyseLabel({
   const cleaned = raw.replace(/^```json\s*/i, '').replace(/```\s*$/i, '').trim()
   return JSON.parse(cleaned)
 }
+
+// Model defaults — Sonnet is ~5× cheaper than Opus and more than sharp enough
+// for structured JSON compliance checks. Callers stay unchanged.
+const MODEL_ANALYSE   = 'claude-sonnet-4-5'
+const MODEL_UTILITY   = 'claude-sonnet-4-5'
 
 // ── TEXT GENERATOR ──────────────────────────────────────────────────────
 /**
@@ -122,7 +132,7 @@ export async function generateLabelText({ track, details }) {
       'anthropic-dangerous-direct-browser-access': 'true',
     },
     body: JSON.stringify({
-      model: 'claude-opus-4-5',
+      model: MODEL_UTILITY,
       max_tokens: 4096,
       system: systemPrompt,
       messages: [{ role: 'user', content: 'Generate the complete label text now. Return only the JSON.' }],
@@ -252,59 +262,72 @@ ${GENERATOR_SCHEMA}`
 }
 
 // ── JSON SCHEMA (shared for compliance checker) ────────────────────────
+// Actionable schema: every finding is a copy-pasteable fix, citable, and severity-weighted.
+// A designer should be able to execute the entire report without leaving this app.
 const JSON_SCHEMA = `
 Return ONLY valid JSON matching this exact schema:
 {
   "verdict": "PASS" | "FAIL" | "REVIEW_REQUIRED",
-  "score": <integer 0-100>,
-  "summary": "<2-3 sentence overall assessment>",
+  "counts": { "blockers": <int>, "majors": <int>, "advisories": <int> },
+  "summary": "<2-3 sentence overall assessment for the reviewer>",
+  "extracted_text": "<the FULL text you see on the label — verbatim, all faces combined, preserving line breaks with \\n. This is used for deterministic post-checks (MRP format, banned-ingredient lookup, mandatory-phrase presence). Do NOT paraphrase or summarise. Empty string if the image is unreadable.>",
   "items": [
     {
-      "field": "<label field name>",
-      "regulation": "<regulation name>",
+      "field": "<short label field name, e.g. 'MRP', 'Storage Instructions'>",
+      "regulation": "<regulation name, e.g. 'Cosmetics Rules 2020'>",
+      "regulation_section": "<specific section/rule/article number, e.g. 'Rule 45(f)' — or empty string if none>",
+      "source": "regulation" | "velite_internal",
       "status": "PASS" | "FAIL" | "WARNING",
-      "found": "<what was found on the label, or 'Not found'>",
-      "issue": "<description of issue, or null if PASS>",
-      "recommendation": "<actionable fix, or null if PASS>"
-    }
-  ],
-  "style_suggestions": [
-    {
-      "category": "<category>",
-      "title": "<rule title>",
-      "description": "<what was learned from this label>"
+      "severity": "blocker" | "major" | "advisory",
+      "evidence_quote": "<the exact text or visual element you saw on the label that this finding refers to, verbatim in quotes — or 'Not present on label' if missing. Never invent; if you cannot cite, mark REVIEW.>",
+      "issue": "<one-sentence description of the problem, or null if PASS>",
+      "required_text": "<the EXACT text the designer should place on the label to fix this — copy-pasteable, correctly formatted, INCLUDING punctuation, units, ₹ symbol etc. Use [PLACEHOLDER] only for values you genuinely cannot know (e.g. batch number). Empty string if the fix is not a text change (e.g. placement/typography).>",
+      "required_placement": "<where on the label the fix must appear: 'PDP (front panel)' | 'back panel' | 'side panel' | 'inside flap' | 'any panel' | '' if not applicable>",
+      "recommendation": "<if the fix is not a simple text insertion, describe the corrective action in one sentence — otherwise empty string>"
     }
   ]
 }
 
-Score rubric: 100 = perfect, deduct 10 per FAIL item, 5 per WARNING item.
-verdict = "PASS" if score >= 80 and no FAIL items, "FAIL" if any FAIL items or score < 60, otherwise "REVIEW_REQUIRED".`
+SEVERITY RULES — apply strictly:
+- "blocker" = cannot legally ship without this fix (missing DLN, missing Schedule H warning, missing MRP, missing net qty, missing manufacturer name, missing CML for cosmetics, missing "Keep out of reach of children" for drugs, drug/therapeutic claim on a cosmetic, wrong Schedule declaration text).
+- "major" = regulatory non-conformance that must be fixed before mass production but is not a shipping blocker on its own (wrong format of an existing declaration, missing consumer helpline, incorrect ingredient list order, imported product without importer details).
+- "advisory" = brand/style / best-practice / soft warning where you are uncertain from the image alone.
+
+VERDICT RULES:
+- verdict = "FAIL"             if counts.blockers > 0
+- verdict = "REVIEW_REQUIRED"  if counts.blockers == 0 AND counts.majors > 0
+- verdict = "PASS"             if counts.blockers == 0 AND counts.majors == 0
+
+EVIDENCE RULE (critical): For every PASS/FAIL/WARNING you MUST quote what you actually saw on the label in "evidence_quote". If a required declaration is absent, quote "Not present on label". Never fabricate text. If you cannot clearly see the artwork, set status="WARNING" severity="advisory" and evidence_quote="Not clearly visible in image".
+
+DO NOT emit findings about font size in mm, area-percentage of a panel, or exact colour Pantone values — you cannot verify these from a scaleless image. Only flag typography where the text is CLEARLY too small to read in the image itself.
+
+SOURCE RULES:
+- source="velite_internal" ONLY when the finding is driven by a rule that appears in the INTERNAL VELITE GUIDELINES section of this prompt (Velite's own SOPs / brand standards).
+- source="regulation" for everything else (Cosmetics Rules 2020, D&C Rules 1945, Legal Metrology, logo/mark checks).
+- When a finding is driven by BOTH a legal reg AND a Velite guideline, tag it "velite_internal" and cite the Velite SOP name in "regulation_section".`
 
 // ── CHECK TYPE SECTION BUILDER ────────────────────────────────────────────
 function buildCheckTypeSection(checkType) {
   if (checkType === 'post-print') {
     return `
 CHECK TYPE: POST-PRINT — Physical Printed Label / Carton Verification
-You are reviewing a PHYSICALLY PRINTED LABEL or carton that has already been produced.
-Apply the following additional criteria on top of the standard compliance checks:
-- LEGIBILITY: All mandatory text must be clearly readable — not smudged, faded, misaligned, or too small. Flag illegible text as FAIL.
-- FONT SIZE: Minimum legal font sizes must be visibly met as ACTUALLY PRINTED (e.g., net quantity min 1mm for small packs). Flag apparent undersized text as FAIL.
-- PRINT QUALITY: Logos, marks (Rx, green dot, recycling symbol) must be clearly printed and not degraded by ink bleed, fading, or poor contrast. Flag poor-quality marks as WARNING (readable) or FAIL (not identifiable).
-- MRP, BATCH NUMBER, EXPIRY DATE must be clearly legible — if they appear to use variable-data printing and are present but unclear, flag as WARNING.
-- COLOUR: Where colour is regulatory (e.g., red band on Schedule H, green/brown dot marks), verify the colour appears correct and not faded.
-- Placeholder fields (blank batch/date areas) are FAIL in post-print — these MUST be filled on a printed label.
-- Barcode / QR code (if present): assess if it appears clearly printed and scannable.`
+You are reviewing a PHYSICALLY PRINTED label/carton.
+- LEGIBILITY: Flag CLEARLY illegible text (smudged, faded, misaligned) as major.
+- PRINT QUALITY of regulatory marks (Rx box, green dot, recycling): if not identifiable → major; readable but degraded → advisory.
+- MRP / Batch / Expiry: if present but visually unclear → advisory; if genuinely absent from a printed label → blocker.
+- COLOUR of regulatory bands (red Schedule H band, green/brown vegetarian dot): flag missing/incorrect colour as major.
+- Placeholder blanks on a printed label are a blocker (must be filled).
+- Do NOT judge font sizes in millimetres — the image has no known scale. Only call out text that is CLEARLY too small to read in the image.`
   }
   return `
 CHECK TYPE: PRE-PRINT — Design Proof / Digital Artwork
-You are reviewing a DIGITAL DESIGN FILE or ARTWORK PROOF before it goes to print.
-Apply the following criteria:
-- Focus on whether all mandatory declarations are PRESENT and correctly formatted.
-- Check text accuracy: INCI names, regulatory text, licence numbers, addresses.
-- For font sizes: assess from the design whether sizes appear to meet minimum legal requirements — flag as WARNING if uncertain.
-- Do NOT penalise for print quality issues — this is a digital file.
-- Blank placeholder fields (e.g., "Batch No.: ___", "Exp. Date: ___") are expected — flag as WARNING (not FAIL) since they will be filled at the time of printing.
-- Concentrate on compliance of the designed text content, layout completeness, and presence of all required marks.`
+You are reviewing a DIGITAL ARTWORK PROOF, not a printed label.
+- Focus on PRESENCE and CORRECT FORMAT of every mandatory declaration.
+- Check regulatory text is exact (INCI names, Schedule warnings verbatim, licence-number format).
+- Do NOT penalise print quality — this is a digital file.
+- Blank placeholders like "Batch No.: ___" are expected — advisory only.
+- Do NOT judge font sizes in millimetres — the image has no known scale.`
 }
 
 // ── LOGO SECTION BUILDER ─────────────────────────────────────────────────
@@ -338,20 +361,21 @@ function buildCosmeticPrompt({ regulations, styleRules, extraContext, productCat
     )
 
   const mandatoryChecklist = `
-MANDATORY DECLARATIONS CHECKLIST (Cosmetics Rules 2020 + Legal Metrology):
-1.  Product name — clearly displayed
-2.  Ingredients list — INCI names, descending order of concentration
-3.  Net weight / volume — with unit, correct font size (min 1mm for small packs)
-4.  Manufacturer name & complete address (including PIN code)
-5.  Country of manufacture (if imported: importer name + address)
-6.  Cosmetic Manufacturing Licence (CML) number
-7.  Batch / Lot number
-8.  Date of manufacture (DOM) or best before / expiry date
-9.  MRP — format: "MRP ₹XX (incl. all taxes)"
-10. Consumer helpline / complaint address
-11. Instructions for use (where applicable)
-12. Warnings / cautions (product-category specific)
-13. For imported products: "Imported by [name], [address]"`
+MANDATORY DECLARATIONS CHECKLIST (Cosmetics Rules 2020 + Legal Metrology).
+For each, provide the exact "required_text" the designer must place on the label:
+1.  Product name — must be clearly displayed on PDP
+2.  Ingredients list — INCI names, descending order of concentration (prefix "Ingredients:")
+3.  Net weight / volume — format: "Net Content: <n> g" or "<n> ml"
+4.  Manufacturer name & complete address including PIN code (prefix "Manufactured by:")
+5.  Country of manufacture (if imported: importer name + address, prefix "Imported by:")
+6.  Cosmetic Manufacturing Licence (CML) number — format: "CML No.: <number>"
+7.  Batch / Lot number — format: "Batch No.: <blank on pre-print>"
+8.  Date of manufacture (DOM) and/or best before date — format: "Mfg. Date: MM/YYYY  |  Best Before: MM/YYYY"
+9.  MRP — format: "MRP ₹<amount> (Incl. of all taxes)"
+10. Consumer helpline / complaint address (a phone number or email is required)
+11. Instructions for use (where applicable to product category)
+12. Warnings / cautions (product-category specific — e.g. "For external use only", "Avoid contact with eyes")
+13. For imported products: "Imported by <name>, <address>"`
 
   let styleSection = ''
   if (styleRules && styleRules.length > 0) {
@@ -447,7 +471,7 @@ export async function analyseExportCompliance({
       'anthropic-dangerous-direct-browser-access': 'true',
     },
     body: JSON.stringify({
-      model: 'claude-opus-4-5',
+      model: MODEL_UTILITY,
       max_tokens: 8192,
       system: systemPrompt,
       messages: [{ role: 'user', content: 'Analyse export compliance gaps now. Return only the JSON.' }],
@@ -565,24 +589,26 @@ function buildDrugPrompt({ regulations, styleRules, extraContext, productCategor
     )
 
   const mandatoryChecklist = `
-MANDATORY DECLARATIONS CHECKLIST (D&C Rules 1945 Rule 96 + Legal Metrology):
-1.  Drug name — brand name + generic (INN) name prominently displayed
-2.  Rx symbol — in a box on principal display panel (for prescription drugs)
-3.  Schedule declaration — e.g., "Schedule H Drug — To be sold by retail on the prescription of a Registered Medical Practitioner only"
-       Schedule H1: add "WARNING: It is dangerous to take this preparation except under medical supervision"
-       Schedule X: "Schedule X Drug" declaration
-4.  Composition — each active ingredient with INN name and quantity per dosage unit (e.g., "Paracetamol IP 500 mg")
-5.  Net contents — number of tablets/capsules, volume (ml), weight (g); per strip AND per carton
-6.  Drugs Licence Number — "Mfg. Lic. No. [State code/number]"
-7.  Manufacturer name & complete address — including city, state, PIN code
-8.  Batch / Lot number — "Batch No." or "Lot No."
+MANDATORY DECLARATIONS CHECKLIST (D&C Rules 1945 Rule 96 + Legal Metrology).
+For each, provide the EXACT "required_text" a designer can paste onto the label:
+1.  Drug name — brand name + generic (INN) name prominently displayed on PDP
+2.  Rx symbol — in a box on PDP for prescription drugs (Schedule H/H1/X)
+3.  Schedule declaration — required_text must be VERBATIM:
+      Schedule H:  "Schedule H Drug — Warning: To be sold by retail on the prescription of a Registered Medical Practitioner only."
+      Schedule H1: "Schedule H1 Drug\\nWARNING: It is dangerous to take this preparation except under medical supervision.\\nTo be sold by retail on the prescription of a Registered Medical Practitioner only."
+      Schedule X:  "Schedule X Drug — To be sold by retail on the prescription of a Registered Medical Practitioner only."
+4.  Composition — "Each <dosage unit> contains: <INN> IP <strength>" (INN names, pharmacopoeial suffix, per-dose quantity)
+5.  Net contents — number of tablets / capsules / volume (ml) / weight (g)
+6.  Drugs Licence Number — "Mfg. Lic. No.: <state-code/number>"
+7.  Manufacturer name & complete address including PIN code (prefix "Manufactured by:")
+8.  Batch / Lot number — "Batch No.: <blank on pre-print>"
 9.  Date of manufacture — "Mfg. Date: MM/YYYY"
-10. Expiry date — "Exp. Date: MM/YYYY" or "Use before: MM/YYYY" (must be EXPIRY, not "best before")
-11. MRP — "MRP ₹XX.XX (Incl. of all taxes)"
-12. Storage conditions — e.g., "Store below 25°C, in a cool dry place, protect from light and moisture"
-13. "Keep out of reach of children" — mandatory
-14. Instructions for use / dosage direction (where applicable)
-15. For imported drugs: importer name, address, and Import Licence Number`
+10. Expiry date — "Exp. Date: MM/YYYY" (MUST be "Exp. Date" not "Best Before")
+11. MRP — "MRP ₹<amount> (Incl. of all taxes)"
+12. Storage conditions — e.g. "Store below 25°C in a cool, dry place. Protect from light and moisture."
+13. "Keep out of reach of children." — verbatim, mandatory
+14. Directions for use / dosage regimen (where applicable)
+15. For imported drugs: "Imported by <name>, <address>" and Import Licence Number`
 
   let styleSection = ''
   if (styleRules && styleRules.length > 0) {
@@ -724,7 +750,7 @@ Return this exact schema:
       'anthropic-dangerous-direct-browser-access': 'true',
     },
     body: JSON.stringify({
-      model: 'claude-opus-4-5',
+      model: MODEL_UTILITY,
       max_tokens: 2048,
       system: systemPrompt,
       messages: [{ role: 'user', content: userContent }],
@@ -805,7 +831,7 @@ Analyse now. Return only the JSON.`
       'anthropic-dangerous-direct-browser-access': 'true',
     },
     body: JSON.stringify({
-      model: 'claude-opus-4-5',
+      model: MODEL_UTILITY,
       max_tokens: 1536,
       system: systemPrompt,
       messages: [{ role: 'user', content: userMsg }],
@@ -882,7 +908,7 @@ Return ONLY valid JSON:
       'anthropic-dangerous-direct-browser-access': 'true',
     },
     body: JSON.stringify({
-      model: 'claude-opus-4-5',
+      model: MODEL_UTILITY,
       max_tokens: 1536,
       system: systemPrompt,
       messages: [{
