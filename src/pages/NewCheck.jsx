@@ -635,6 +635,21 @@ export default function NewCheck() {
 
           {result && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+              {result._partial && (
+                <div style={{
+                  padding: '10px 14px',
+                  background: 'var(--warn-bg, #fffbeb)',
+                  border: '1px solid var(--warn-border, #fde68a)',
+                  borderLeft: '3px solid var(--warn, #d97706)',
+                  borderRadius: 4,
+                  fontSize: 12,
+                  color: 'var(--text-2)',
+                }}>
+                  <strong>Partial result</strong> — Claude's response was truncated before the full report finished
+                  (label had many findings or long extracted text). Showing what we could recover. Re-running usually
+                  produces a complete report.
+                </div>
+              )}
               {/* Result header — severity-weighted, not a single number */}
               <div className="result-header">
                 <SeverityBreakdown items={allItems} fallbackScore={result.score} />
