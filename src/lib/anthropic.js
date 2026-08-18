@@ -80,7 +80,12 @@ export async function analyseLabel({
     },
     body: JSON.stringify({
       model: MODEL_ANALYSE,
-      max_tokens: 4096,
+      // The v2 schema is richer — every finding carries required_text +
+      // evidence_quote + placement, plus a full extracted_text transcription
+      // for deterministic post-checks. Dense pharma labels routinely need
+      // 6-8k output tokens; 12k is a safe ceiling that still lets prompt
+      // caching pay off.
+      max_tokens: 12000,
       // Prompt caching on the shared regulatory system prompt.
       // Anthropic caches the block for ~5 min, so a burst of checks in one
       // session pays for the big regulatory context once, not per check.
@@ -96,12 +101,78 @@ export async function analyseLabel({
     throw new Error(`Claude API error: ${response.status} — ${err}`)
   }
 
-  const data = await response.json()
-  const raw = data.content?.[0]?.text || ''
+  const data      = await response.json()
+  const raw       = data.content?.[0]?.text || ''
+  const stopReason = data.stop_reason  // 'end_turn' | 'max_tokens' | ...
 
   // Strip markdown code fences if present
   const cleaned = raw.replace(/^```json\s*/i, '').replace(/```\s*$/i, '').trim()
-  return JSON.parse(cleaned)
+
+  try {
+    return JSON.parse(cleaned)
+  } catch (parseErr) {
+    // Common failure: response hit max_tokens mid-string. Try to salvage the
+    // items[] array we DO have so the user gets partial value instead of an
+    // error page — worst outcome would be losing an entire successful run
+    // over one unterminated string.
+    const salvaged = salvageTruncatedJSON(cleaned)
+    if (salvaged) {
+      salvaged._partial   = true
+      salvaged._stopReason = stopReason
+      return salvaged
+    }
+    const hint = stopReason === 'max_tokens'
+      ? ' (response was truncated — the label may have too many findings; try re-running or splitting the check)'
+      : ''
+    throw new Error(`Could not parse Claude's response${hint}: ${parseErr.message}`)
+  }
+}
+
+// Best-effort recovery of a truncated JSON response. We walk the raw string
+// keeping track of quote/brace/bracket balance and cut at the last position
+// where the structure was still valid, then close any dangling containers.
+// Returns the parsed object on success, or null if we can't rescue anything.
+function salvageTruncatedJSON(s) {
+  if (!s || typeof s !== 'string') return null
+  let inString = false, escape = false
+  let lastGoodEnd = -1  // index just after a comma or closing brace/bracket at depth >= 1
+  const stack = []      // '{' or '['
+  for (let i = 0; i < s.length; i++) {
+    const c = s[i]
+    if (escape) { escape = false; continue }
+    if (c === '\\' && inString) { escape = true; continue }
+    if (c === '"') { inString = !inString; continue }
+    if (inString) continue
+    if (c === '{' || c === '[') stack.push(c)
+    else if (c === '}' || c === ']') {
+      stack.pop()
+      if (stack.length >= 1) lastGoodEnd = i + 1
+    } else if (c === ',' && stack.length >= 1) {
+      lastGoodEnd = i    // remember position so we can trim the trailing comma
+    }
+  }
+  if (lastGoodEnd < 0) return null
+  let candidate = s.slice(0, lastGoodEnd).replace(/,\s*$/, '')
+  // Rebuild the closing brackets for whatever depth we were at
+  // Reconstruct by re-walking the trimmed candidate
+  const closers = []
+  const openStack = []
+  let inStr2 = false, esc2 = false
+  for (let i = 0; i < candidate.length; i++) {
+    const c = candidate[i]
+    if (esc2) { esc2 = false; continue }
+    if (c === '\\' && inStr2) { esc2 = true; continue }
+    if (c === '"') { inStr2 = !inStr2; continue }
+    if (inStr2) continue
+    if (c === '{' || c === '[') openStack.push(c)
+    else if (c === '}' || c === ']') openStack.pop()
+  }
+  while (openStack.length) {
+    const o = openStack.pop()
+    closers.push(o === '{' ? '}' : ']')
+  }
+  candidate += closers.join('')
+  try { return JSON.parse(candidate) } catch { return null }
 }
 
 // Model defaults — Sonnet is ~5× cheaper than Opus and more than sharp enough
